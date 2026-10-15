@@ -1,0 +1,54 @@
+name: VPS Direct Deployment via SSH
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        required: true
+        type: string
+      deploy_path:
+        required: false
+        type: string
+        default: "/opt/production"
+
+jobs:
+  deploy:
+    name: Deploy to VPS via SSH
+    runs-on: ubuntu-latest
+    steps:
+      - name: Execute remote deployment commands
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: true
+          envs: GITHUB_SHA
+          script: |
+            cd ${{ inputs.deploy_path }}
+
+            # Store previous tag for rollback
+            PREV_SHA=$(docker compose config --images | head -n 1 | cut -d: -f2)
+
+            echo "Starting deployment of commit ${GITHUB_SHA}..."
+            export IMAGE_TAG=${GITHUB_SHA}
+
+            # Authenticate with container registry
+            echo "${{ secrets.REGISTRY_PASSWORD }}" | docker login ${{ secrets.REGISTRY_URL }} -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
+
+            # Pull images
+            docker compose pull
+
+            # Up containers and wait for healthchecks to pass
+            if docker compose up -d --remove-orphans --wait; then
+              echo "✅ Deployment succeeded and containers are healthy!"
+            else
+              echo "❌ Healthcheck failed! Initiating rollback to ${PREV_SHA}..."
+              export IMAGE_TAG=${PREV_SHA}
+              docker compose up -d --wait
+              exit 1
+            fi
+
+            # Clean up old dangling images
+            docker image prune -f

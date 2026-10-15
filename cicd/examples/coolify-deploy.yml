@@ -1,0 +1,72 @@
+name: Coolify Deploy Pipeline
+
+on:
+  workflow_call:
+    inputs:
+      app_name:
+        required: true
+        type: string
+      dockerfile:
+        required: true
+        type: string
+    secrets:
+      REGISTRY_USERNAME:
+        required: true
+      REGISTRY_PASSWORD:
+        required: true
+      COOLIFY_WEBHOOK:
+        required: false
+      COOLIFY_API_TOKEN:
+        required: false
+      COOLIFY_URL:
+        required: false
+      COOLIFY_APP_UUID:
+        required: false
+
+jobs:
+  build:
+    name: Build & Push Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ secrets.REGISTRY_URL || 'ghcr.io' }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ inputs.dockerfile }}
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ${{ secrets.REGISTRY_URL || 'ghcr.io' }}/${{ inputs.app_name }}:${{ github.sha }}
+            ${{ secrets.REGISTRY_URL || 'ghcr.io' }}/${{ inputs.app_name }}:latest
+          cache-from: type=gha,scope=${{ inputs.app_name }}
+          cache-to: type=gha,mode=max,scope=${{ inputs.app_name }}
+
+  deploy-webhook:
+    name: Deploy via Coolify Webhook
+    needs: build
+    if: secrets.COOLIFY_WEBHOOK != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Coolify Webhook
+        run: |
+          curl --fail-with-body --request POST "${{ secrets.COOLIFY_WEBHOOK }}"
+
+  deploy-api:
+    name: Deploy via Coolify REST API
+    needs: build
+    if: secrets.COOLIFY_API_TOKEN != '' && secrets.COOLIFY_APP_UUID != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Coolify API Deploy
+        run: |
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Authorization: Bearer ${{ secrets.COOLIFY_API_TOKEN }}" \
+            "${{ secrets.COOLIFY_URL }}/api/v1/deploy?uuid=${{ secrets.COOLIFY_APP_UUID }}&force=false"

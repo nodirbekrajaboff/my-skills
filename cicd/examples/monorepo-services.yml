@@ -1,0 +1,116 @@
+name: Production Monorepo Deployment
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "package.json"
+      - "bun.lock"
+      - "turbo.json"
+      - ".dockerignore"
+      - ".github/workflows/**"
+
+concurrency:
+  group: production-deployment
+  cancel-in-progress: false # Never interrupt active production deployments
+
+jobs:
+  quality:
+    name: Quality Gate
+    uses: ./.github/workflows/_quality.yml
+
+  changes:
+    name: Detect Changed Services
+    runs-on: ubuntu-latest
+    outputs:
+      bot: ${{ steps.detect.outputs.bot }}
+      server: ${{ steps.detect.outputs.server }}
+      workers: ${{ steps.detect.outputs.workers }}
+      migrator: ${{ steps.detect.outputs.migrator }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect affected services
+        id: detect
+        env:
+          BEFORE_SHA: ${{ github.event.before }}
+          CURRENT_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" || -z "${BEFORE_SHA:-}" || "$BEFORE_SHA" == "0000000000000000000000000000000000000000" ]]; then
+            echo "bot=true" >> "$GITHUB_OUTPUT"
+            echo "server=true" >> "$GITHUB_OUTPUT"
+            echo "workers=true" >> "$GITHUB_OUTPUT"
+            echo "migrator=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          shared=(packages package.json bun.lock turbo.json .dockerignore .github/workflows/**)
+
+          for service in bot server workers; do
+            if git diff --quiet "$BEFORE_SHA" "$CURRENT_SHA" -- "apps/$service" "${shared[@]}"; then
+              echo "$service=false" >> "$GITHUB_OUTPUT"
+            else
+              echo "$service=true" >> "$GITHUB_OUTPUT"
+            fi
+          done
+
+          if git diff --quiet "$BEFORE_SHA" "$CURRENT_SHA" -- "apps/migrator" "packages/db" "${shared[@]}"; then
+            echo "migrator=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "migrator=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  migrator:
+    name: Run Migrations
+    needs: [quality, changes]
+    if: needs.changes.outputs.migrator == 'true'
+    uses: ./.github/workflows/ci-cd-migrator.yml
+    secrets: inherit
+
+  bot:
+    name: Deploy Telegram Bot
+    needs: [quality, changes, migrator]
+    if: always() && needs.quality.result == 'success' && (needs.migrator.result == 'success' || needs.migrator.result == 'skipped') && needs.changes.outputs.bot == 'true'
+    uses: ./.github/workflows/_build-deploy.yml
+    with:
+      app_name: bot
+      dockerfile: apps/bot/Dockerfile
+    secrets:
+      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+      REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+      DEPLOY_WEBHOOK: ${{ secrets.DOKPLOY_BOT_WEBHOOK }}
+
+  server:
+    name: Deploy Backend API
+    needs: [quality, changes, migrator]
+    if: always() && needs.quality.result == 'success' && (needs.migrator.result == 'success' || needs.migrator.result == 'skipped') && needs.changes.outputs.server == 'true'
+    uses: ./.github/workflows/_build-deploy.yml
+    with:
+      app_name: server
+      dockerfile: apps/server/Dockerfile
+    secrets:
+      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+      REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+      DEPLOY_WEBHOOK: ${{ secrets.DOKPLOY_SERVER_WEBHOOK }}
+
+  workers:
+    name: Deploy Background Workers
+    needs: [quality, changes, migrator]
+    if: always() && needs.quality.result == 'success' && (needs.migrator.result == 'success' || needs.migrator.result == 'skipped') && needs.changes.outputs.workers == 'true'
+    uses: ./.github/workflows/_build-deploy.yml
+    with:
+      app_name: workers
+      dockerfile: apps/workers/Dockerfile
+    secrets:
+      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+      REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+      DEPLOY_WEBHOOK: ${{ secrets.DOKPLOY_WORKERS_WEBHOOK }}
