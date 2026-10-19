@@ -1,56 +1,50 @@
-# grammY Plugins Guide & Best Practices
+# Complete grammY Plugins Guide (Built-in, Official & Third-Party)
 
-grammY has a rich ecosystem of built-in and official modular plugins. This guide explains how and when to use each plugin, along with code patterns, type flavoring, and critical anti-patterns.
+## Table of Contents
 
----
+### Part I: Built-in Plugins (Core `"grammy"`)
+1. [Sessions (`session`, `lazySession`, `enhanceStorage`)](#1-sessions-session-lazysession-enhancestorage)
+2. [Inline & Custom Keyboards (`InlineKeyboard` & `Keyboard`)](#2-inline--custom-keyboards-inlinekeyboard--keyboard)
+3. [Media Groups (`InputMediaBuilder`)](#3-media-groups-inputmediabuilder)
+4. [Inline Queries (`InlineQueryResultBuilder`)](#4-inline-queries-inlinequeryresultbuilder)
 
-## 1. Built-in Plugins
+### Part II: Official Plugins (`@grammyjs/*`)
+5. [Conversations 2.0 (`@grammyjs/conversations`)](#5-conversations-20-grammyjsconversations)
+6. [Interactive Menus (`@grammyjs/menu`)](#6-interactive-menus-grammyjsmenu)
+7. [Concurrent Runner (`@grammyjs/runner`)](#7-concurrent-runner-grammyjsrunner)
+8. [Commands (`@grammyjs/commands`)](#8-commands-grammyjscommands)
+9. [Parse Mode & FormattedString (`@grammyjs/parse-mode`)](#9-parse-mode--formattedstring-grammyjsparse-mode)
+10. [Message Streaming (`@grammyjs/stream`)](#10-message-streaming-grammyjsstream)
+11. [Internationalization (`@grammyjs/i18n` & `@grammyjs/fluent`)](#11-internationalization-grammyjsi18n--grammyjsfluent)
+12. [Chat Members (`@grammyjs/chat-members`)](#12-chat-members-grammyjschat-members)
+13. [Hydration (`@grammyjs/hydrate`)](#13-hydration-grammyjshydrate)
+14. [Files (`@grammyjs/files`)](#14-files-grammyjsfiles)
+15. [Auto-Retry (`@grammyjs/auto-retry`)](#15-auto-retry-grammyjsauto-retry)
+16. [Flood Control (`@grammyjs/transformer-throttler`)](#16-flood-control-grammyjstransformer-throttler)
+17. [User Rate Limiter (`@grammyjs/ratelimiter`)](#17-user-rate-limiter-grammyjsratelimiter)
+18. [Emoji (`@grammyjs/emoji`)](#18-emoji-grammyjsemoji)
+19. [Router (`@grammyjs/router`)](#19-router-grammyjsrouter)
+20. [Stateless Question (`@grammyjs/stateless-question`)](#20-stateless-question-grammyjsstateless-question)
 
-### 1.1 Keyboards (`InlineKeyboard` & `Keyboard`)
-Imported directly from `"grammy"`.
-
-#### Inline Keyboard (Attached to messages)
-```typescript
-import { InlineKeyboard } from "grammy";
-
-const inlineKeyboard = new InlineKeyboard()
-  .text("Option A", "btn:opt_a")
-  .text("Option B", "btn:opt_b")
-  .row()
-  .url("Docs", "https://grammy.dev")
-  .webApp("Open App", "https://my-mini-app.com")
-  .row()
-  .switchInline("Share with friends", "Check this out!");
-
-await ctx.reply("Please make a choice:", {
-  reply_markup: inlineKeyboard,
-});
-```
-
-#### Custom Reply Keyboard (Replaces device keyboard)
-```typescript
-import { Keyboard } from "grammy";
-
-const customKeyboard = new Keyboard()
-  .text("📍 Send Location").requestLocation()
-  .text("📞 Send Contact").requestContact()
-  .row()
-  .text("Cancel")
-  .resized() // Shrinks keyboard height to match buttons
-  .oneTime(); // Hides keyboard after a single tap
-
-await ctx.reply("Share your credentials:", {
-  reply_markup: customKeyboard,
-});
-```
+### Part III: Third-Party Plugins & Plugin Authoring
+21. [Console Time (`telegraf-middleware-console-time`)](#21-console-time-telegraf-middleware-console-time)
+22. [Useful Middlewares (`grammy-middlewares`)](#22-useful-middlewares-grammy-middlewares)
+23. [Autoquote (`@roziscoding/grammy-autoquote`)](#23-autoquote-roziscodinggrammy-autoquote)
+24. [Entity Parser (`@qz/telegram-entities-parser`)](#24-entity-parser-qztelegram-entities-parser)
+25. [Developing Custom Plugins (`plugins/guide.md`)](#25-developing-custom-plugins-pluginsguidemd)
 
 ---
 
-### 1.2 Sessions (`session` & `lazySession`)
-Provides persistent state across updates for a given chat or user.
+# Part I: Built-in Plugins (Core `"grammy"`)
 
-#### In-Memory Session (Development only)
-```typescript
+Built-in plugins are included directly in the `grammy` package—do **not** install separate packages for them.
+
+## 1. Sessions (`session`, `lazySession`, `enhanceStorage`)
+
+Sessions persist per-chat or per-user state across updates (`ctx.session`).
+
+### Basic Usage
+```ts
 import { Bot, Context, session, type SessionFlavor } from "grammy";
 
 interface SessionData {
@@ -63,648 +57,1226 @@ const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
 bot.use(
   session({
     initial: (): SessionData => ({ pizzaCount: 0 }),
-    // Default session key is `${ctx.chat?.id}`
-  })
+  }),
 );
 
-bot.command("pizza", async (ctx) => {
+bot.command("hunger", async (ctx) => {
   ctx.session.pizzaCount++;
-  await ctx.reply(`You have ordered ${ctx.session.pizzaCount} pizzas!`);
+  await ctx.reply(`You ate ${ctx.session.pizzaCount} pizzas!`);
 });
 ```
 
-#### Persistent Storage Adapters (Production)
-For production, never use default in-memory storage (data is lost on reboot, and clustering fails).
-Install the appropriate adapter:
-- Redis: `@grammyjs/storage-redis`
-- MongoDB: `@grammyjs/storage-mongodb`
-- Supabase: `@grammyjs/storage-supabase`
-- Prisma: `@grammyjs/storage-prisma`
-- Deno KV: `@grammyjs/storage-denokv`
-- File: `@grammyjs/storage-file`
+### Session Keys (`getSessionKey`)
+By default, sessions are stored per chat (`ctx.chat?.id.toString()`). You can customize `getSessionKey`:
+```ts
+// Store per-user across all chats:
+function getUserSessionKey(ctx: Context): string | undefined {
+  return ctx.from?.id.toString();
+}
 
-Example with Redis:
-```typescript
-import { RedisAdapter } from "@grammyjs/storage-redis";
-import IORedis from "ioredis";
+// Store per user+chat combination:
+function getUserInChatKey(ctx: Context): string | undefined {
+  return ctx.from === undefined || ctx.chat === undefined
+    ? undefined
+    : `${ctx.chat.id}/${ctx.from.id}`;
+}
+```
+> **Warning**: Never access `ctx.session` when `getSessionKey(ctx)` returns `undefined` (e.g., on `inline_query` or `poll` updates with default chat-based keys), or grammY will throw an error! Also note that in channels or anonymous admin messages, `ctx.from` is absent (check `ctx.msg?.author_signature` if needed).
 
-const redis = new IORedis(process.env.REDIS_URL!);
-const storage = new RedisAdapter({ instance: redis, ttl: 86400 });
+### Storage Adapters
+- **In-Memory (Default)**: `new MemorySessionStorage()` (lost on restart; for dev only).
+- **Free Cloud Storage (`@grammyjs/storage-free`)**: Zero-setup cloud storage tied to your bot token for hobby projects:
+  ```ts
+  import { freeStorage } from "@grammyjs/storage-free";
+  bot.use(session({ initial: () => ({ count: 0 }), storage: freeStorage<SessionData>(bot.token) }));
+  ```
+- **Official External Storage Adapters (`@grammyjs/storage`)**: Supports Redis (`ioredis`), PostgreSQL, MongoDB, File System, Cloudflare D1, Cloudflare KV, Deno KV, Prisma, TypeORM, Supabase, Vercel KV, Memcached, S3, Firestore, Upstash, etc.
+- **Custom Storage Adapter**: Any object implementing `StorageAdapter<T>` (`read(key)`, `write(key, value)`, `delete(key)`).
+
+### Multi Sessions (`type: "multi"`)
+Partition session data into independent fragments with different keys, initializers, and storage backends:
+```ts
+interface UserData { age?: number }
+interface ChatData { welcomeText: string }
+interface SessionData {
+  user: UserData;
+  chat: ChatData;
+}
+type MyContext = Context & SessionFlavor<SessionData>;
+
+bot.use(
+  session({
+    type: "multi",
+    user: {
+      initial: () => ({}),
+      getSessionKey: (ctx) => ctx.from?.id.toString(),
+      prefix: "user/",
+    },
+    chat: {
+      initial: () => ({ welcomeText: "Hello!" }),
+      prefix: "chat/",
+    },
+  }),
+);
+```
+
+### Lazy Sessions (`lazySession` & `LazySessionFlavor`)
+Skips database read/write on updates that never touch `await ctx.session`:
+```ts
+import { Bot, Context, lazySession, type LazySessionFlavor } from "grammy";
+
+type MyContext = Context & LazySessionFlavor<SessionData>;
+const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
+
+bot.use(lazySession({ initial: () => ({ pizzaCount: 0 }) }));
+
+bot.command("eat", async (ctx) => {
+  const session = await ctx.session; // Triggers DB read only here!
+  session.pizzaCount++;
+});
+```
+
+### Storage Enhancements (`enhanceStorage`: Timeouts & Migrations)
+Wrap any storage adapter with `enhanceStorage` to add TTL (`millisecondsToLive`) and schema `migrations`:
+```ts
+import { enhanceStorage, type Enhance, MemorySessionStorage } from "grammy";
+
+interface OldSession { count: number }
+interface SessionData { pizzaCount: number }
+
+const bot = new Bot<Context & SessionFlavor<SessionData>>(process.env.BOT_TOKEN!);
 
 bot.use(
   session({
     initial: () => ({ pizzaCount: 0 }),
-    storage,
-  })
+    storage: enhanceStorage({
+      storage: new MemorySessionStorage<Enhance<SessionData>>(),
+      millisecondsToLive: 60 * 60 * 1000, // 1 hour TTL
+      migrations: {
+        1: (old: OldSession): SessionData => ({ pizzaCount: old.count }),
+      },
+    }),
+  }),
 );
 ```
 
-#### Lazy Sessions (`lazySession`)
-When using remote databases, reading and writing session data on every single update adds latency.
-`lazySession` resolves the session Promise only when `await ctx.session` is accessed.
+### Group-to-Supergroup Chat Migrations
+When a regular group upgrades to a supergroup, Telegram assigns a new chat ID and sends `:migrate_to_chat_id` (on the old group) and `:migrate_from_chat_id` (on the new supergroup). Copy or migrate your session data in a `bot.on(":migrate_to_chat_id")` handler.
 
 ---
 
-## 2. Interactive Dialogs & State
+## 2. Inline & Custom Keyboards (`InlineKeyboard` & `Keyboard`)
 
-### 2.1 Conversations (`@grammyjs/conversations`)
-Allows writing multi-step dialogs linearly using `async`/`await` instead of complex state machine transitions.
+> **Important**: You cannot send both an `InlineKeyboard` and a custom `Keyboard` in the same message, nor can you edit a custom keyboard message into an inline keyboard message.
 
-```bash
-bun add @grammyjs/conversations
-# or npm install @grammyjs/conversations
+### Inline Keyboards (`InlineKeyboard`)
+Displayed directly underneath a message. Pressing a `.text()` button sends a `callback_query` update.
+
+```ts
+import { InlineKeyboard } from "grammy";
+
+const inlineKeyboard = new InlineKeyboard()
+  .text("« 1", "page:1")
+  .text("· 2 ·", "page:2")
+  .text("3 »", "page:3")
+  .row()
+  .url("Docs 📖", "https://grammy.dev")
+  .webApp("Open App 📱", "https://example.com/webapp")
+  .switchInline("Share in chat", "query_text")
+  .switchInlineCurrent("Search here", "query_text")
+  .switchInlineChosen("Share to groups", { allow_group_chats: true });
+
+// Functional construction from arrays via InlineKeyboard.from():
+const pairs = [["One", "1"], ["Two", "2"]];
+const dynamicInline = InlineKeyboard.from([
+  pairs.map(([label, data]) => InlineKeyboard.text(label, data)),
+]);
+
+// Send with message:
+await ctx.reply("Choose an option:", { reply_markup: inlineKeyboard });
+
+// Handle specific button clicks:
+bot.callbackQuery("page:1", async (ctx) => {
+  await ctx.answerCallbackQuery({ text: "Page 1 loaded!" });
+});
+
+// Handle regex button clicks:
+bot.callbackQuery(/^page:(\d+)$/, async (ctx) => {
+  const page = ctx.match[1];
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageText(`Viewing page ${page}`, { reply_markup: inlineKeyboard });
+});
+
+// Catch-all for unhandled callback queries (removes client loading spinner):
+bot.on("callback_query:data", async (ctx) => {
+  console.log("Unhandled callback payload:", ctx.callbackQuery.data);
+  await ctx.answerCallbackQuery();
+});
 ```
 
-#### Setup & Types
-```typescript
-import { Context, session, type SessionFlavor } from "grammy";
-import {
-  conversations,
-  createConversation,
-  type ConversationFlavor,
-  type Conversation,
-} from "@grammyjs/conversations";
+### Custom Reply Keyboards (`Keyboard`)
+Replaces the user's system keyboard. Pressing a button sends its label as a regular text message.
 
-type MyContext = Context & SessionFlavor<{}> & ConversationFlavor;
-type MyConversation = Conversation<MyContext>;
+```ts
+import { Keyboard } from "grammy";
 
-// Define conversation builder function
-async function checkoutConversation(conversation: MyConversation, ctx: MyContext) {
-  await ctx.reply("What is your delivery address?");
-  
-  // Wait for text message response
-  const addressCtx = await conversation.waitFor("message:text");
-  const address = addressCtx.msg.text;
+const keyboard = new Keyboard()
+  .text("Yes ✅").text("No ❌").row()
+  .requestContact("Share Phone 📞")
+  .requestLocation("Share Location 📍").row()
+  .requestUsers("Pick a Friend 👥", 1, { user_is_bot: false })
+  .requestChat("Pick a Group 💬", 2, { chat_is_channel: false })
+  .requestPoll("Create Poll 📊", "regular")
+  .resized()                     // Resize vertically to fit buttons
+  .oneTime()                     // Hide immediately after 1 click
+  .persistent()                  // Keep visible when system keyboard is hidden
+  .placeholder("Choose Yes/No")  // Input field placeholder text
+  .selected();                   // Show only to @-mentioned users or reply target
 
-  await ctx.reply(`Deliver to: ${address}.\nHow many units would you like?`);
-  
-  // Wait until user sends a valid number
-  const unitsCtx = await conversation.waitFor("message:text");
-  const count = parseInt(unitsCtx.msg.text, 10);
-  
-  if (isNaN(count) || count <= 0) {
-    await ctx.reply("Invalid quantity. Cancelling checkout.");
-    return;
-  }
+await ctx.reply("Confirm?", { reply_markup: keyboard });
 
-  // CRITICAL: Side-effects (database queries, network calls) MUST use conversation.external!
-  const orderId = await conversation.external(async () => {
-    return await db.orders.create({ address, count, userId: ctx.from!.id });
+// Functional construction from arrays:
+const labels = ["Option A", "Option B"];
+const fromArrayKb = Keyboard.from(labels.map((l) => [Keyboard.text(l)])).resized();
+
+// Remove a custom keyboard (must be sent with a new message):
+await ctx.reply("Keyboard removed.", {
+  reply_markup: { remove_keyboard: true, selective: false },
+});
+```
+
+---
+
+## 3. Media Groups (`InputMediaBuilder`)
+
+Media groups (albums of 2–10 photos, videos, documents, or audio files) are **built into core `grammy`** via `InputMediaBuilder`. (There is no `@grammyjs/media-group` package!)
+
+```ts
+import { InputFile, InputMediaBuilder } from "grammy";
+
+// Send an album (2 to 10 items)
+bot.command("album", async (ctx) => {
+  await ctx.replyWithMediaGroup([
+    InputMediaBuilder.photo("https://grammy.dev/images/Y.png", {
+      caption: "grammY Logo",
+    }),
+    InputMediaBuilder.photo(new InputFile("/path/to/local.jpg")),
+    InputMediaBuilder.video("https://example.com/demo.mp4", {
+      has_spoiler: true,
+    }),
+  ]);
+});
+
+// Edit the media of an existing message
+bot.callbackQuery("swap-photo", async (ctx) => {
+  await ctx.answerCallbackQuery();
+  await ctx.editMessageMedia(
+    InputMediaBuilder.photo("https://grammy.dev/images/grammY.png", {
+      caption: "Updated image!",
+    }),
+  );
+});
+```
+
+> **Receiving Albums**: In Telegram's Bot API, an album sent by a user arrives as **separate individual `message` updates** sharing the same `ctx.msg.media_group_id`. Telegram never tells your bot how many items are in an album or which message is the last one. Design your bot to handle each file individually (or ask the user to press an Inline Keyboard button / send `/done` when finished uploading).
+
+---
+
+## 4. Inline Queries (`InlineQueryResultBuilder`)
+
+Inline queries let users type `@your_bot query` in any chat. Requires enabling Inline Mode via `@BotFather` (`/setinline`).
+
+```ts
+import { InlineKeyboard, InlineQueryResultBuilder } from "grammy";
+
+// 1. Match specific inline queries via string or RegExp
+bot.inlineQuery(/best bot (framework|library)/i, async (ctx) => {
+  const result = InlineQueryResultBuilder.article("id:grammy", "grammY", {
+    description: "The Telegram Bot Framework",
+    reply_markup: new InlineKeyboard().url("Website", "https://grammy.dev/"),
+  }).text("<b>grammY</b> is the best way to build Telegram bots!", {
+    parse_mode: "HTML",
   });
 
-  await ctx.reply(`✅ Order created! ID: #${orderId}`);
-}
+  // Build photo result that sends the photo itself:
+  const photoResult = InlineQueryResultBuilder.photo(
+    "id:logo",
+    "https://grammy.dev/images/grammY.png",
+  );
 
-// Order of installation is mandatory:
-bot.use(session({ initial: () => ({}) }));
-bot.use(conversations());
-bot.use(createConversation(checkoutConversation));
+  // Build photo result that displays a photo preview but sends text when tapped:
+  const photoTextResult = InlineQueryResultBuilder.photo(
+    "id:logo-text",
+    "https://grammy.dev/images/grammY.png",
+  ).text("This text is sent instead of the photo!");
 
-// Entering the conversation
-bot.command("buy", async (ctx) => {
-  await ctx.conversation.enter("checkoutConversation");
+  // Build cached file result from an existing file_id:
+  // InlineQueryResultBuilder.audioCached("id:audio", audioFileId);
+
+  await ctx.answerInlineQuery([result, photoResult, photoTextResult], {
+    cache_time: 30 * 24 * 3600,
+    is_personal: false,
+    next_offset: "page_2", // Pagination offset passed back in ctx.inlineQuery.offset
+    button: {
+      text: "Log in via private chat",
+      start_parameter: "login", // Deep-links to /start login
+    },
+  });
+});
+
+// 2. Return empty results for unmatched inline queries
+bot.on("inline_query", (ctx) => ctx.answerInlineQuery([]));
+
+// 3. Handle the deep-linked button above inline results and return user to chat
+bot
+  .command("start")
+  .filter((ctx) => ctx.match === "login", async (ctx) => {
+    await ctx.reply("Authenticated! Click below to return to your chat:", {
+      reply_markup: new InlineKeyboard().switchInline("Return to chat"),
+    });
+  });
+
+// 4. Listen for chosen inline results (requires /setinlinefeedback in @BotFather)
+bot.chosenInlineResult(/^id:/, async (ctx) => {
+  console.log(`User chose ${ctx.chosenInlineResult.result_id} for query "${ctx.chosenInlineResult.query}"`);
 });
 ```
-
-#### Critical Conversations Rules:
-1. **Always register `session()` before `conversations()`**.
-2. **Never execute non-deterministic actions directly**: Wrap random number generators, current timestamps, external database calls, or HTTP requests inside `await conversation.external(() => ...)` so the replay engine stays consistent.
-3. **Do not modify global variables** directly inside a conversation function without `conversation.external`.
 
 ---
 
-### 2.2 Interactive Menus (`@grammyjs/menu`)
-Declarative, dynamic, hierarchical inline keyboards that update smoothly without flickering or resending messages.
+# Part II: Official Plugins (`@grammyjs/*`)
 
-```bash
-bun add @grammyjs/menu
-# or npm install @grammyjs/menu
+## 5. Conversations 2.0 (`@grammyjs/conversations`)
+
+The `conversations` plugin (`npm install @grammyjs/conversations`) lets you write multi-step conversational flows as normal sequential `async` functions with loops, branches, `try/catch`, forms, and conversational menus.
+
+### Conversations 2.0 Architecture: Outside vs. Inside Context Types
+In **Conversations 2.0**, the context type **outside** a conversation (`MyContext`) and the context type **inside** a conversation (`MyConversationContext`) are **distinct**:
+- **Outside (`MyContext`)**: Wrapped with `ConversationFlavor<Context>` (adds `ctx.conversation.enter()`, `ctx.conversation.exit()`, `ctx.conversation.active()`).
+- **Inside (`MyConversationContext`)**: Does NOT have `ConversationFlavor`, and only includes plugins explicitly installed on `createConversation(fn, { plugins: [...] })`.
+- **No `session()` Required by Default**: Conversations 2.0 manages its own storage directly via `conversations({ storage: ... })` and does **not** require `bot.use(session())` unless your bot uses sessions separately.
+
+```ts
+import { Bot, Context } from "grammy";
+import {
+  type Conversation,
+  type ConversationFlavor,
+  conversations,
+  createConversation,
+} from "@grammyjs/conversations";
+
+// 1. Define Outside Context and Inside Context
+type MyContext = ConversationFlavor<Context>;
+type MyConversationContext = Context;
+type MyConversation = Conversation<MyContext, MyConversationContext>;
+
+const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
+
+// 2. Define Conversation Builder Function
+async function movieConversation(
+  conversation: MyConversation,
+  ctx: MyConversationContext,
+) {
+  await ctx.reply("What are your top 3 favorite movies?");
+  const movies: string[] = [];
+  for (let i = 1; i <= 3; i++) {
+    const titleCtx = await conversation.waitFor("message:text", {
+      otherwise: (ctx) => ctx.reply("Please send a text message!"),
+    });
+    movies.push(titleCtx.message.text);
+  }
+  await ctx.reply(`Great taste! Your list: ${movies.join(", ")}`);
+}
+
+// 3. Install conversations() and register the conversation
+bot.use(conversations());
+bot.use(createConversation(movieConversation));
+
+// 4. Enter the conversation from a normal handler
+bot.command("movies", async (ctx) => {
+  await ctx.conversation.enter("movieConversation");
+});
+
+bot.start();
 ```
 
-```typescript
+### How the Replay Engine Works & The Three Golden Rules
+When `await conversation.wait()` is reached, execution halts and the operation log is persisted. When the next update arrives, the conversation function is **replayed from the top**: previously completed `wait` and `ctx.api` calls resolve immediately from the persisted log without re-executing HTTP calls, until execution reaches the newly arrived `wait()`.
+
+Because of replay, **ALL code inside a conversation function MUST obey the Three Golden Rules**:
+1. **RULE 1**: Wrap ALL side effects (database reads/writes, external `fetch` calls, file system I/O, reading/writing `ctx.session`) inside `await conversation.external(...)`!
+2. **RULE 2**: Wrap ALL randomness or timestamps inside `await conversation.random()` / `await conversation.now()` / `await conversation.sleep(ms)` / `await conversation.log(...)` (or `conversation.external()`).
+3. **RULE 3**: Store all values received from `conversation.wait*()` or `conversation.external()` in local variables rather than mutating globals or closures outside the conversation.
+
+```ts
+// Wrapping external DB calls & custom serialization:
+const userProfile = await conversation.external({
+  task: () => db.users.findById(ctx.from!.id),
+  beforeStore: (user) => JSON.stringify(user),
+  afterLoad: (raw) => JSON.parse(raw),
+});
+
+// Deterministic helpers built into conversation:
+const rnd = await conversation.random();        // Replay-safe Math.random()
+const timestamp = await conversation.now();     // Replay-safe Date.now()
+await conversation.sleep(2000);                 // Replay-safe 2s delay
+await conversation.log("User profile:", userProfile); // Only logs on first execution!
+```
+
+### Waiting for Updates (`wait`, `waitFor`, `waitUntil`, `otherwise`)
+Every `wait*` method returns a new `ctx` representing the newly received update:
+
+```ts
+// Wait for any update:
+ctx = await conversation.wait();
+
+// Wait for specific filter query with `otherwise` fallback:
+const textCtx = await conversation.waitFor("message:text", {
+  otherwise: (ctx) => ctx.reply("Please send text only!"),
+});
+
+// Wait for specific command, hears, or callback query:
+const cmdCtx = await conversation.waitForCommand("confirm");
+const hearsCtx = await conversation.waitForHears(/^yes$/i);
+const cbCtx = await conversation.waitForCallbackQuery(/^item:(\d+)$/);
+
+// Chained filters (.andForHears, .andFrom, etc.):
+const replyFromSameUser = await conversation
+  .waitFor(":text")
+  .andFrom(ctx.from)
+  .andForHears(/^secret/);
+
+// Wait with custom predicate (waitUntil / waitUnless):
+const photoWithCaption = await conversation.waitUntil(
+  (ctx) => ctx.has(":photo") && Boolean(ctx.msg.caption),
+  { otherwise: (ctx) => ctx.reply("Send a photo WITH a caption!") },
+);
+
+// Skip and pass update down to outside middleware:
+// { otherwise: (ctx) => conversation.skip({ next: true }) }
+```
+
+### Leaving Conversations (`halt` vs. `exit`)
+```ts
+// Inside a conversation: immediately stop and exit
+if (textCtx.msg.text === "/cancel") {
+  await textCtx.reply("Cancelled.");
+  await conversation.halt(); // Never returns!
+}
+
+// Outside a conversation (e.g. a /cancel command registered BEFORE createConversation):
+bot.command("cancel", async (ctx) => {
+  await ctx.conversation.exit("movieConversation"); // or ctx.conversation.exitAll()
+  await ctx.reply("Left conversation.");
+});
+
+// Inspect active conversations:
+const stats = await ctx.conversation.active(); // Record<string, number>
+const count = await ctx.conversation.active("movieConversation"); // number
+```
+
+### Persisting Conversations State (`conversations({ storage })`)
+Always configure persistent storage in production and specify a `version` (bumping `version` cleanly invalidates incompatible in-flight conversation logs when you change conversation code):
+
+```ts
+import { MemorySessionStorage } from "grammy";
+import { conversations, type ConversationData, type VersionedState } from "@grammyjs/conversations";
+
+const storage = new MemorySessionStorage<VersionedState<ConversationData>>();
+
+bot.use(
+  conversations({
+    storage: {
+      type: "key",
+      version: 1, // Increment when deploying breaking changes to conversation flow
+      adapter: storage,
+      prefix: "convo-",
+    },
+  }),
+);
+```
+
+### Using Plugins & `ctx.session` Inside Conversations
+Because the inside context is constructed fresh during replay, plugins installed via `bot.use()` on the outside bot are **not** automatically installed on `MyConversationContext`:
+
+1. **Standard Plugins (e.g. `hydrate`, `i18n`)**: Pass to `plugins` array in `createConversation` (or `conversations({ plugins: [...] })`):
+   ```ts
+   type MyConversationContext = HydrateFlavor<Context>;
+   bot.use(
+     createConversation(myConvo, {
+       id: "my-convo",
+       plugins: [hydrate()],
+     }),
+   );
+   ```
+2. **Accessing `ctx.session` Inside a Conversation**: Use `conversation.external()` to read and write the outside `ctx.session`:
+   ```ts
+   // Read session from outside context:
+   const session = await conversation.external((ctx) => ctx.session);
+
+   // Modify session...
+   session.score += 10;
+
+   // Write session back to outside context:
+   await conversation.external((ctx) => {
+     ctx.session = session;
+   });
+   ```
+
+### Conversational Forms (`conversation.form`)
+Built-in validators that loop until the user provides valid input:
+```ts
+const name = await conversation.form.text({
+  otherwise: (ctx) => ctx.reply("Please send plain text!"),
+});
+const age = await conversation.form.int({
+  minimum: 18,
+  maximum: 120,
+  otherwise: (ctx) => ctx.reply("Enter a valid age between 18 and 120!"),
+});
+const choice = await conversation.form.select(["Small", "Medium", "Large"], {
+  otherwise: (ctx) => ctx.reply("Pick Small, Medium, or Large!"),
+});
+const photos = await conversation.form.photo();
+
+// Custom form field via conversation.form.build:
+const positiveEven = await conversation.form.build(
+  (ctx) => ctx.has(":text") ? Number(ctx.msg.text) : undefined,
+  (val) => val !== undefined && !isNaN(val) && val > 0 && val % 2 === 0,
+);
+```
+
+### Conversational Menus (`conversation.menu()`)
+Create interactive inline menus scoped directly inside a conversation without colliding with `@grammyjs/menu`:
+```ts
+async function settingsConvo(conversation: MyConversation, ctx: MyConversationContext) {
+  let notifications = true;
+
+  const subMenu = conversation.menu("sub")
+    .text("Action", (ctx) => ctx.reply("Done!"))
+    .back("⬅️ Back");
+
+  const mainMenu = conversation.menu("main", { autoAnswer: true })
+    .text(
+      () => (notifications ? "🔔 On" : "🔕 Off"),
+      (ctx) => {
+        notifications = !notifications;
+        ctx.menu.update();
+      },
+    )
+    .submenu("More ➡️", subMenu)
+    .row()
+    .text("Done ✅", (ctx) => ctx.menu.close());
+
+  await ctx.reply("Configure your settings:", { reply_markup: mainMenu });
+  await conversation.wait(); // Keep menu active while user interacts
+}
+```
+
+### Wait Timeouts, Enter/Exit Hooks, Checkpoints & Rewind, Parallel Conversations
+- **Wait Timeouts**: Pass `{ maxMilliseconds: 60_000 }` to `conversation.wait*()` or `createConversation(fn, { maxMillisecondsToWait: 300_000 })`. If the user takes longer, the conversation halts when their next message arrives and the update falls through to normal handlers.
+- **Enter/Exit Hooks**:
+  ```ts
+  bot.use(conversations({
+    onEnter: (id, ctx) => console.log(`Entering ${id}`),
+    onExit: (id, ctx) => console.log(`Exiting ${id}`),
+  }));
+  ```
+- **Concurrent Waits (`Promise.all`)**:
+  ```ts
+  const [textCtx, photoCtx] = await Promise.all([
+    conversation.waitFor(":text"),
+    conversation.waitFor(":photo"),
+  ]); // Completes after user sends both a text and a photo in any order!
+  ```
+- **Checkpoints & Rewind** (Time-travel back to an earlier step in a conversation!):
+  ```ts
+  const startPoint = conversation.checkpoint();
+  await ctx.reply("Send a destination:");
+  const dest = await conversation.form.text();
+  if (dest === "restart") {
+    await conversation.rewind(startPoint); // Never returns; rewinds execution!
+  }
+  ```
+- **Parallel Conversations**: Pass `createConversation(fn, { parallel: true })` so multiple conversations can be active simultaneously in the same chat.
+
+---
+
+## 6. Interactive Menus (`@grammyjs/menu`)
+
+The `menu` plugin (`npm install @grammyjs/menu`) builds stateful, reactive inline keyboards with automatic callback routing, dynamic labels, and multi-level navigation without manual `bot.callbackQuery()` boilerplate.
+
+```ts
+import { Bot, Context } from "grammy";
 import { Menu, MenuRange } from "@grammyjs/menu";
 
-// Root Menu
-const mainMenu = new Menu<MyContext>("main-menu")
+const bot = new Bot(process.env.BOT_TOKEN!);
+
+// 1. Create Main Menu
+const mainMenu = new Menu("root-menu", {
+  autoAnswer: true,
+  onMenuOutdated: "Updated menu! Please try again.",
+})
   .text(
-    (ctx) => (ctx.session.notifications ? "🔔 Notifications [ON]" : "🔕 Notifications [OFF]"),
-    (ctx) => {
-      ctx.session.notifications = !ctx.session.notifications;
-      ctx.menu.update(); // Re-renders the button label in place!
-    }
+    (ctx) => `Hello ${ctx.from?.first_name ?? "User"}!`, // Dynamic label
+    (ctx) => ctx.reply("Clicked greeting!"),
   )
   .row()
-  .submenu("Settings", "settings-menu")
-  .row()
-  .text("Help", (ctx) => ctx.reply("Need assistance? Contact support."));
+  .submenu("Credits ➡️", "credits-menu")
+  .url("Website 🌐", "https://grammy.dev");
 
-// Submenu
-const settingsMenu = new Menu<MyContext>("settings-menu")
-  .text("Profile", (ctx) => ctx.reply("User Profile..."))
-  .text("Language", (ctx) => ctx.reply("Language options..."))
-  .row()
-  .back("⬅️ Back"); // Automatically navigates back to parent
-
-// Register hierarchy
-mainMenu.register(settingsMenu);
-bot.use(mainMenu);
-
-bot.command("settings", async (ctx) => {
-  await ctx.reply("Control Panel:", { reply_markup: mainMenu });
-});
-```
-
-#### Dynamic Paginated Lists in Menus
-```typescript
-const fruitMenu = new Menu<MyContext>("fruits-menu")
-  .dynamic(async (ctx, range) => {
-    const fruits = ["Apple", "Banana", "Cherry", "Date", "Elderberry"];
-    for (const fruit of fruits) {
+// 2. Create Submenu with Dynamic Range & Button Payloads
+const creditsMenu = new Menu("credits-menu")
+  .dynamic((ctx, range) => {
+    // Dynamically generate buttons per render:
+    for (const item of ["Alpha", "Beta", "Gamma"]) {
       range
-        .text(fruit, (c) => c.reply(`You chose ${fruit}`))
+        .text({ text: item, payload: item }, (ctx) => {
+          const picked = ctx.match; // Reads button payload!
+          ctx.reply(`Picked ${picked}`);
+        })
         .row();
     }
   })
-  .back("Back");
+  .back("⬅️ Go Back");
+
+// 3. Register Submenu & Mount Root Menu BEFORE handlers
+mainMenu.register(creditsMenu);
+bot.use(mainMenu);
+
+bot.command("start", async (ctx) => {
+  await ctx.reply("Check out this menu:", { reply_markup: mainMenu });
+});
 ```
+
+### Key Menu Operations
+- `ctx.menu.update()`: Re-renders the menu in-place when state changes (or `await ctx.menu.update({ immediate: true })` to force immediate API call).
+- `ctx.menu.close()`: Removes the inline keyboard from the message.
+- `ctx.menu.nav("sub-id")` / `ctx.menu.back()`: Programmatically navigate between registered menus.
+- **Custom Fingerprints**: `new Menu("id", { fingerprint: (ctx) => ctx.session.stateVersion })` detects outdated menus even when button layout looks identical.
 
 ---
 
-## 3. High Load, Concurrency & Resilience
+## 7. Concurrent Runner (`@grammyjs/runner`)
 
-### 3.1 Concurrency Runner & Sequentialize (`@grammyjs/runner`)
-grammY runner processes updates concurrently with customizable workers.
+Built-in `bot.start()` processes updates sequentially. For high-throughput long polling, install `@grammyjs/runner` (`npm install @grammyjs/runner`).
 
-```bash
-bun add @grammyjs/runner
-# or npm install @grammyjs/runner
-```
-
-```typescript
+```ts
 import { Bot, Context, session } from "grammy";
 import { run, sequentialize } from "@grammyjs/runner";
 
 const bot = new Bot(process.env.BOT_TOKEN!);
 
-// Deterministic session key generator
-function getSessionKey(ctx: Context): string | undefined {
-  return ctx.chat?.id.toString();
-}
+// 1. CRITICAL: Sequentialize updates that share state BEFORE session()!
+// You can return a single string OR an array of strings (e.g. both chat and user):
+bot.use(
+  sequentialize((ctx) => {
+    const chat = ctx.chat?.id.toString();
+    const user = ctx.from?.id.toString();
+    return [chat, user].filter((con): con is string => con !== undefined);
+  }),
+);
 
-// 1. MUST sequentialize updates by session key BEFORE session middleware
-// Prevents Write-After-Read (WAR) race condition hazards
-bot.use(sequentialize(getSessionKey));
+// 2. Install session AFTER sequentialize
+bot.use(session({ initial: () => ({ count: 0 }) }));
 
-// 2. Install session
-bot.use(session({ getSessionKey, initial: () => ({}) }));
+bot.on("message", (ctx) => ctx.reply("Processed concurrently & safely!"));
 
-// 3. Start runner instead of bot.start()
-const runner = run(bot, {
+// 3. Start the runner
+const handle = run(bot, {
   runner: {
-    fetch: {
-      allowed_updates: ["message", "callback_query"],
-    },
+    fetch: { allowed_updates: ["message", "callback_query"] },
   },
   sink: {
-    concurrency: 500, // Maximum concurrent updates
+    concurrency: 500, // Max concurrent updates in flight
   },
 });
 
-// Graceful termination
-const stop = () => runner.isRunning() && runner.stop();
-process.once("SIGINT", stop);
-process.once("SIGTERM", stop);
+// Graceful shutdown
+const stopRunner = () => handle.isRunning() && handle.stop();
+process.once("SIGINT", stopRunner);
+process.once("SIGTERM", stopRunner);
+
+// Wait for runner termination if needed:
+// await handle.task();
+```
+
+### Multithreading with `BotWorker` and `distribute`
+For CPU-intensive workloads, `@grammyjs/runner` can distribute updates across Node.js `worker_threads` or Deno `Web Worker`s:
+```ts
+// worker.ts
+import { BotWorker } from "@grammyjs/runner";
+const bot = new BotWorker(process.env.BOT_TOKEN!);
+bot.on("message", (ctx) => ctx.reply("Handled in worker thread!"));
+
+// index.ts (main thread)
+import { Bot } from "grammy";
+import { distribute, run } from "@grammyjs/runner";
+const bot = new Bot(process.env.BOT_TOKEN!);
+bot.use(distribute(__dirname + "/worker", { count: 4 }));
+run(bot);
 ```
 
 ---
 
-### 3.2 Auto-Retry (`@grammyjs/auto-retry`)
-Automatically intercepts HTTP 429 (`Too Many Requests`) flood wait responses, delays execution for `retry_after` seconds, and retries the request safely.
+## 8. Commands (`@grammyjs/commands`)
 
-```bash
-bun add @grammyjs/auto-retry
+The `commands` plugin (`npm install @grammyjs/commands`) supercharges command handling with BotFather-free menu synchronization (`setCommands`), chat scopes, multi-language localization, custom prefixes, mid-message matching, RegExp commands, and fuzzy typo suggestions (`commandNotFound`).
+
+```ts
+import { Bot, Context } from "grammy";
+import {
+  CommandGroup,
+  commandNotFound,
+  commands,
+  type CommandsFlavor,
+  LanguageCodes,
+} from "@grammyjs/commands";
+
+type MyContext = CommandsFlavor<Context>;
+const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
+
+bot.use(commands());
+
+const myCommands = new CommandGroup<MyContext>();
+
+myCommands
+  .command("hello", "Say hello")
+  // Localize command name and description for Spanish users:
+  .localize(LanguageCodes.Spanish, "hola", "Decir hola")
+  // Restrict handler & menu visibility by scope:
+  .addToScope(
+    { type: "all_Private_chats" },
+    (ctx) => ctx.reply(`Hello, private chat!`),
+  )
+  .addToScope(
+    { type: "all_group_chats" },
+    (ctx) => ctx.reply(`Hello, group ${ctx.chat.title}!`),
+  );
+
+// Custom prefixes (e.g., "!") or case-insensitivity:
+myCommands.command(
+  " status",
+  "Check status",
+  (ctx) => ctx.reply("OK"),
+  { prefix: "!", ignoreCase: true, matchOnlyAtStart: false },
+);
+
+// RegExp commands (for handlers only; cannot be synced to Telegram menu):
+myCommands
+  .command(/delete_([a-zA-Z0-9]+)/, "Delete item")
+  .addToScope({ type: "all_Private_chats" }, (ctx) => {
+    await ctx.reply(`Deleting ${ctx.match[1]}`);
+  });
+
+bot.use(myCommands);
+
+// Suggest closest known command when user makes a typo:
+bot
+  .filter(commandNotFound(myCommands, { similarityThreshold: 0.4 }))
+  .use(async (ctx) => {
+    if (ctx.commandSuggestion) {
+      await ctx.reply(`Unknown command. Did you mean ${ctx.commandSuggestion}?`);
+    } else {
+      await ctx.reply("Unknown command.");
+    }
+  });
+
+// Sync all scoped & localized commands to Telegram's native menu UI:
+await myCommands.setCommands(bot);
 ```
 
-```typescript
+---
+
+## 9. Parse Mode & `FormattedString` (`@grammyjs/parse-mode`)
+
+Instead of manually escaping MarkdownV2 or HTML characters (and risking `400 Bad Request: Cannot parse entities`), `@grammyjs/parse-mode` v2 (`npm install @grammyjs/parse-mode`) builds native Telegram `entities` arrays via the `fmt` tagged template and `FormattedString` class.
+
+```ts
+import {
+  a,
+  b,
+  blockquote,
+  code,
+  expandableBlockquote,
+  fmt,
+  FormattedString,
+  i,
+  pre,
+  spoiler,
+  s,
+  u,
+} from "@grammyjs/parse-mode";
+
+bot.command("format", async (ctx) => {
+  const untrustedUserInput = "<script> & *weird_chars* [test]";
+
+  // 1. Using `fmt` tagged template literal (auto-escapes and computes entities!):
+  const message = fmt`${b}Hello ${ctx.from?.first_name}!${b}
+Safe user input: ${code}${untrustedUserInput}${code}
+Visit ${a("https://grammy.dev")}grammY Docs${a}!`;
+
+  // Spread .text and .entities (NO parse_mode needed!):
+  await ctx.reply(message.text, { entities: message.entities });
+
+  // 2. Method chaining via FormattedString:
+  const captionFmt = FormattedString.b("Photo Title\n")
+    .plain("Normal text with ")
+    .spoiler("hidden spoiler")
+    .plain(" and ")
+    .u("underlined text");
+
+  // Spread .caption and .caption_entities for media methods:
+  await ctx.replyWithPhoto("https://grammy.dev/images/Y.png", {
+    caption: captionFmt.caption,
+    caption_entities: captionFmt.caption_entities,
+  });
+});
+```
+
+---
+
+## 10. Message Streaming (`@grammyjs/stream`)
+
+The `stream` plugin (`npm install @grammyjs/stream`) streams large or dynamically generated text (such as LLM outputs) into Telegram using progressive message drafts (`sendMessageDraft`) and automatic 4,096-byte message splitting.
+
+```ts
+import { Bot, Context } from "grammy";
+import { stream, type StreamFlavor } from "@grammyjs/stream";
+import { streamText } from "ai";
+
+type MyContext = StreamFlavor<Context>;
+const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
+
+bot.use(stream());
+
+// Stream an AsyncGenerator:
+bot.command("story", async (ctx) => {
+  async function* generateChunks() {
+    yield "Once upon a time, ";
+    await new Promise((r) => setTimeout(r, 500));
+    yield "in a galaxy far, far away...";
+  }
+  await ctx.replyWithStream(generateChunks());
+});
+
+// Stream Markdown or HTML with Vercel AI SDK:
+bot.command("ai", async (ctx) => {
+  const result = streamText({
+    model: myModel,
+    prompt: ctx.match || "Explain grammY in 3 sentences.",
+  });
+  await ctx.replyWithMarkdownStream(result.textStream);
+  // Or: await ctx.replyWithHtmlStream(result.textStream);
+});
+```
+
+---
+
+## 11. Internationalization (`@grammyjs/i18n` & `@grammyjs/fluent`)
+
+Prefer `@grammyjs/i18n` (`npm install @grammyjs/i18n`) for both Node.js and Deno. It uses Mozilla's [Project Fluent](https://projectfluent.org/) (`.ftl` files).
+
+### Example `locales/en.ftl`
+```ftl
+-bot-name = CartBot
+start = Hello { $name }, welcome to { -bot-name }!
+cart = You have { NUMBER($items) ->
+    [0] no items
+    [one] { $items } item
+   *[other] { $items } items
+} in your cart.
+```
+
+### Usage with `@grammyjs/i18n`
+```ts
+import { Bot, Context, session, SessionFlavor } from "grammy";
+import { I18n, I18nFlavor } from "@grammyjs/i18n";
+
+interface SessionData { __language_code?: string }
+type MyContext = Context & SessionFlavor<SessionData> & I18nFlavor;
+
+const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
+
+const i18n = new I18n<MyContext>({
+  defaultLocale: "en",
+  directory: "locales",
+  useSession: true, // Persist language changes in ctx.session.__language_code
+  fluentBundleOptions: { useIsolating: false },
+});
+
+bot.use(session({ initial: () => ({}) }));
+bot.use(i18n);
+
+bot.command("start", async (ctx) => {
+  await ctx.reply(ctx.t("start", { name: ctx.from?.first_name ?? "friend" }));
+});
+
+bot.command("lang_es", async (ctx) => {
+  await ctx.i18n.setLocale("es");
+  await ctx.reply(ctx.t("start", { name: ctx.from?.first_name ?? "amigo" }));
+});
+
+// Match localized custom keyboard button labels across all locales!
+bot.hears(i18n.hears("cart_btn"), async (ctx) => {
+  await ctx.reply(ctx.t("cart", { items: 3 }));
+});
+```
+
+---
+
+## 12. Chat Members (`@grammyjs/chat-members`)
+
+Simplifies `chat_member` and `my_chat_member` status transitions (`in`, `out`, `free`, `admin`, `regular`, `restricted_in`, `restricted_out`), hydrates `ChatMember` objects with `.is()`, and caches chat members in storage.
+
+```ts
+import { API_CONSTANTS, Api, Bot, Context, MemorySessionStorage } from "grammy";
+import type { ChatMember } from "grammy/types";
+import {
+  chatMemberFilter,
+  chatMemberIs,
+  chatMembers,
+  type ChatMembersFlavor,
+  hydrateChatMember,
+  type HydrateChatMemberApiFlavor,
+  type HydrateChatMemberFlavor,
+  myChatMemberFilter,
+} from "@grammyjs/chat-members";
+
+type MyContext = HydrateChatMemberFlavor<Context & ChatMembersFlavor>;
+type MyApi = HydrateChatMemberApiFlavor<Api>;
+
+const bot = new Bot<MyContext, MyApi>(process.env.BOT_TOKEN!);
+const adapter = new MemorySessionStorage<ChatMember>();
+
+bot.api.config.use(hydrateChatMember());
+bot.use(chatMembers(adapter));
+
+const groups = bot.chatType(["group", "supergroup"]);
+
+// React when any user joins the group ("out" -> "in"):
+groups.filter(chatMemberFilter("out", "in"), async (ctx) => {
+  const user = ctx.chatMember.new_chat_member.user;
+  await ctx.reply(`Welcome ${user.first_name}!`);
+});
+
+// React when the bot itself is promoted to admin:
+groups.filter(myChatMemberFilter("regular", "admin"), async (ctx) => {
+  await ctx.reply("Thanks for promoting me to admin!");
+});
+
+// Check admin status inside a command using hydrated .is():
+groups.command("ban", async (ctx) => {
+  const author = await ctx.getAuthor();
+  if (!author.is("admin")) {
+    return ctx.reply("Only admins can use /ban!");
+  }
+  // Read cached chat member from storage adapter:
+  const member = await ctx.chatMembers.getChatMember();
+});
+
+// IMPORTANT: Must include "chat_member" in allowed_updates!
+bot.start({
+  allowed_updates: [...API_CONSTANTS.DEFAULT_UPDATE_TYPES, "chat_member"],
+});
+```
+
+---
+
+## 13. Hydration (`@grammyjs/hydrate`)
+
+Attaches convenience methods (`.editText()`, `.delete()`, `.answer()`, etc.) directly onto objects inside `ctx` and returned by API calls.
+
+```ts
+import { Api, Bot, Context } from "grammy";
+import {
+  hydrate,
+  hydrateApi,
+  type HydrateApiFlavor,
+  hydrateContext,
+  type HydrateFlavor,
+} from "@grammyjs/hydrate";
+
+// Simple Installation (hydrates ctx and ctx.api results):
+type MyContext = HydrateFlavor<Context>;
+const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
+bot.use(hydrate());
+
+// Advanced Installation (also hydrates standalone bot.api.* results):
+// type MyApi = HydrateApiFlavor<Api>;
+// const bot = new Bot<MyContext, MyApi>(process.env.BOT_TOKEN!);
+// bot.use(hydrateContext());
+// bot.api.config.use(hydrateApi());
+
+bot.on(":photo", async (ctx) => {
+  const statusMsg = await ctx.reply("Processing...");
+  await statusMsg.editText("Done!");
+  setTimeout(() => statusMsg.delete().catch(() => {}), 3000);
+});
+```
+
+---
+
+## 14. Files (`@grammyjs/files`)
+
+Adds `.download(path?)` and `.getUrl()` to `getFile()` results.
+
+```ts
+import { Api, Bot, Context } from "grammy";
+import { type FileApiFlavor, type FileFlavor, hydrateFiles } from "@grammyjs/files";
+
+type MyContext = FileFlavor<Context>;
+type MyApi = FileApiFlavor<Api>;
+
+const bot = new Bot<MyContext, MyApi>(process.env.BOT_TOKEN!);
+bot.api.config.use(hydrateFiles(bot.token));
+
+bot.on([":video", ":animation", ":photo"], async (ctx) => {
+  const file = await ctx.getFile();
+  const url = file.getUrl(); // Valid for >= 1 hour (or local path on Local Bot API Server)
+  const savedPath = await file.download(); // Downloads to temp file or custom path
+  console.log("Downloaded to:", savedPath);
+});
+```
+
+---
+
+## 15. Auto-Retry (`@grammyjs/auto-retry`)
+
+An API transformer (`npm install @grammyjs/auto-retry`) that automatically intercepts `429 Too Many Requests` (`retry_after`), waits the required duration, and retries the request. Also retries `5xx` internal server errors and `HttpError` network errors using exponential backoff (starting at 3s, capped at 1 hour).
+
+```ts
 import { autoRetry } from "@grammyjs/auto-retry";
 
 bot.api.config.use(
   autoRetry({
-    maxRetryAttempts: 3, // Max retries per request
-    maxDelaySeconds: 60, // Maximum wait time before giving up
-  })
+    maxRetryAttempts: 3,               // Max retries per request
+    maxDelaySeconds: 60,               // Fail immediately if retry_after > 60s
+    rethrowInternalServerErrors: false, // Set true to not retry 5xx errors
+    rethrowHttpErrors: false,           // Set true to not retry network errors
+  }),
 );
 ```
 
 ---
 
-### 3.3 Transformer Throttler (`@grammyjs/transformer-throttler`)
-Throttles outbound API calls to keep them smoothly under Telegram limits (30 requests/sec globally, 1 message/sec per private chat).
+## 16. Flood Control (`@grammyjs/transformer-throttler`)
 
-```bash
-bun add @grammyjs/transformer-throttler
-```
+Enqueues outgoing API requests using `Bottleneck` (`npm install @grammyjs/transformer-throttler`) to proactively stay within Telegram's documented rate limits (30 msgs/sec global, 20 msgs/min per group, 1 msg/sec per private chat). Pair with `autoRetry()` for complete flood safety.
 
-```typescript
+```ts
 import { apiThrottler } from "@grammyjs/transformer-throttler";
 
 const throttler = apiThrottler({
-  global: {
-    maxAmount: 30,
-    timespan: 1000,
-  },
-  out: {
-    maxAmount: 1,
-    timespan: 1000,
-  },
+  global: { reservoir: 30, reservoirRefreshAmount: 30, reservoirRefreshInterval: 1000 },
+  group: { maxConcurrent: 1, minTime: 1000, reservoir: 20, reservoirRefreshAmount: 20, reservoirRefreshInterval: 60000 },
+  out: { maxConcurrent: 1, minTime: 1000 },
 });
-
 bot.api.config.use(throttler);
 ```
 
 ---
 
-### 3.4 Rate Limiter (`@grammyjs/ratelimiter`)
-Protects against inbound spam floods by dropping or punishing users who send updates too quickly.
+## 17. User Rate Limiter (`@grammyjs/ratelimiter`)
 
-```bash
-bun add @grammyjs/ratelimiter
-```
+Inbound middleware (`npm install @grammyjs/ratelimiter`) that throttles spammy users by `from.id` (or `chat.id`) in memory or Redis (`ioredis`).
 
-```typescript
+```ts
 import { limit } from "@grammyjs/ratelimiter";
 
 bot.use(
   limit({
     timeFrame: 2000, // 2 seconds
-    limit: 3,        // 3 requests allowed per timeFrame
+    limit: 3,        // Max 3 updates per 2 seconds
+    storageClient: "MEMORY_STORE", // Or pass an ioredis instance for multi-instance clusters
     onLimitExceeded: async (ctx) => {
-      await ctx.reply("⚠️ Please slow down! You are sending commands too quickly.");
+      await ctx.reply("Please refrain from sending too many requests!");
     },
     keyGenerator: (ctx) => ctx.from?.id.toString(),
-  })
+  }),
 );
 ```
 
 ---
 
-## 4. Developer Ergonomics & Utilities
+## 18. Emoji (`@grammyjs/emoji`)
 
-### 4.1 Hydrate (`@grammyjs/hydrate`)
-Allows direct method calling on returned message instances.
+Autocomplete emoji names in template strings and reaction handlers (`npm install @grammyjs/emoji`).
 
-```typescript
-import { hydrate, type HydrateFlavor } from "@grammyjs/hydrate";
+```ts
+import { Bot, Context } from "grammy";
+import { type EmojiFlavor, emojiParser, Reactions } from "@grammyjs/emoji";
 
-type MyContext = HydrateFlavor<Context>;
-bot.use(hydrate());
-
-bot.command("counter", async (ctx) => {
-  // Returned message has .editReplyMarkup(), .delete(), .editMessageText()
-  const msg = await ctx.reply("Processing...");
-  await msg.editText("Done!");
-});
-```
-
----
-
-### 4.2 Parse Mode (`@grammyjs/parse-mode`)
-Sets a global default parse mode (HTML or MarkdownV2) and exposes tagged template literals for safe escaping.
-
-```typescript
-import { parseMode, html, md } from "@grammyjs/parse-mode";
-
-// Default parse mode to HTML for all outgoing requests
-bot.api.config.use(parseMode("HTML"));
-
-bot.command("info", async (ctx) => {
-  const userInput = "<script>alert('xss')</script>";
-  // Automatically escapes dynamic interpolation safely:
-  await ctx.reply(html`<b>User:</b> ${userInput}`);
-});
-```
-
----
-
-### 4.3 Files (`@grammyjs/files`)
-Installs `download()` helper on file objects.
-
-```typescript
-import { hydrateFiles } from "@grammyjs/files";
-
-bot.api.config.use(hydrateFiles(bot.token));
-
-bot.on("message:photo", async (ctx) => {
-  const file = await ctx.getFile();
-  // Download directly to disk:
-  const path = await file.download("./downloads/photo.jpg");
-  console.log("Saved photo to:", path);
-});
-```
-
----
-
-### 4.4 Internationalization (`@grammyjs/i18n`)
-Multi-language translation using Fluent files (`.ftl`).
-
-```typescript
-import { I18n, type I18nFlavor } from "@grammyjs/i18n";
-
-const i18n = new I18n<MyContext>({
-  defaultLocale: "en",
-  directory: "locales",
-});
-
-bot.use(i18n);
-
-bot.command("start", async (ctx) => {
-  // Uses key from locales/en.ftl or locales/es.ftl based on ctx.from.language_code
-  await ctx.reply(ctx.t("welcome", { name: ctx.from?.first_name }));
-});
-```
-
----
-
-### 4.5 Autoquote (`@grammyjs/autoquote`)
-Ensures all bot replies automatically quote the triggering message as a reply without passing `reply_parameters`.
-
-```typescript
-import { autoQuote } from "@grammyjs/autoquote";
-
-bot.use(autoQuote);
-```
-
----
-
-### 4.6 Streaming Message Drafts (`@grammyjs/stream`)
-Streams text incrementally into private chats (perfect for LLMs, OpenAI, Claude, Gemini).
-It installs `ctx.replyWithStream`, `ctx.replyWithMarkdownStream`, and `ctx.replyWithHtmlStream`.
-
-```bash
-bun add @grammyjs/stream @grammyjs/auto-retry
-```
-
-```typescript
-import { Bot, type Context } from "grammy";
-import { stream, type StreamFlavor } from "@grammyjs/stream";
-import { autoRetry } from "@grammyjs/auto-retry";
-
-type MyContext = StreamFlavor<Context>;
+type MyContext = EmojiFlavor<Context>;
 const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
 
-// MUST use autoRetry because streaming performs rapid API calls
-bot.api.config.use(autoRetry());
-bot.use(stream());
+bot.use(emojiParser());
 
-// Generator yielding token chunks
-async function* generateResponse(prompt: string) {
-  const chunks = ["Thinking...", "\nHere is", " your answer", " generated progressively!"];
-  for (const chunk of chunks) {
-    yield chunk;
-    await new Promise((r) => setTimeout(r, 400));
-  }
-}
-
-bot.chatType("private").command("ask", async (ctx) => {
-  // Streams Markdown text live
-  await ctx.replyWithMarkdownStream(generateResponse(ctx.match));
+bot.command("ping", async (ctx) => {
+  await ctx.replyWithEmoji`Pong ${"ping_pong"}!`;
+  await ctx.react(Reactions.thumbs_up);
 });
 ```
 
 ---
 
-### 4.7 Stateless Question (`@grammyjs/stateless-question`)
-Allows asking a question and catching the user's reply without persisting any session data in a database. It works by appending a zero-width invisible character sequence to the question message.
+## 19. Router (`@grammyjs/router`)
 
-```bash
-bun add @grammyjs/stateless-question
-```
+Routes updates into branches based on a selector function (`npm install @grammyjs/router`). *(Note: For multi-step forms, prefer `@grammyjs/conversations` over session-based routers).*
 
-```typescript
-import { StatelessQuestion } from "@grammyjs/stateless-question";
-
-const ageQuestion = new StatelessQuestion("ask_age", async (ctx) => {
-  const age = Number(ctx.message.text);
-  await ctx.reply(`You are ${age} years old!`);
-});
-
-bot.use(ageQuestion.middleware());
-
-bot.command("start", async (ctx) => {
-  await ageQuestion.replyWithMarkdown(ctx, "How old are you?");
-});
-```
-
----
-
-### 4.8 Media Groups (`@grammyjs/media-group`)
-When users send multiple photos or videos as an album, Telegram delivers them as separate messages sharing the same `media_group_id`. This plugin groups them into a single update.
-
-```bash
-bun add @grammyjs/media-group
-```
-
-```typescript
-import { mediaGroup } from "@grammyjs/media-group";
-
-bot.use(mediaGroup());
-
-bot.on("message:media_group", async (ctx) => {
-  // ctx.mediaGroup is an array of messages belonging to this album
-  console.log(`Received album containing ${ctx.mediaGroup.length} items`);
-});
-```
-
----
-
-### 4.9 Router (`@grammyjs/router`)
-Implements deterministic routing for finite state machines based on a key (e.g., current route stored in session).
-
-```bash
-bun add @grammyjs/router
-```
-
-```typescript
+```ts
 import { Router } from "@grammyjs/router";
 
-const router = new Router<MyContext>((ctx) => ctx.session.step);
-
-router.route("step_one", async (ctx) => {
-  await ctx.reply("In step 1. Moving to step 2...");
-  ctx.session.step = "step_two";
-});
-
-router.route("step_two", async (ctx) => {
-  await ctx.reply("In step 2. Finished!");
-  ctx.session.step = "idle";
-});
+const router = new Router<MyContext>((ctx) => ctx.session.mode);
+router.route("admin", async (ctx) => ctx.reply("Admin mode"));
+router.route("user").on("message:text", async (ctx) => ctx.reply("User text"));
+router.otherwise((ctx) => ctx.reply("Unknown mode"));
 
 bot.use(router);
 ```
 
 ---
 
-### 4.10 Chat Members (`@grammyjs/chat-members`)
-Maintains an in-memory or Redis-backed cache of chat member statuses and permissions to avoid repeated `getChatMember` Bot API calls.
+## 20. Stateless Question (`@grammyjs/stateless-question`)
 
-```bash
-bun add @grammyjs/chat-members
-```
+Creates stateless force-reply questions (`npm install @grammyjs/stateless-question`) that work in group privacy mode without database storage by appending an invisible zero-width non-joiner identifier suffix to the question text.
 
-```typescript
-import { chatMembers, MemoryStorageAdapter } from "@grammyjs/chat-members";
+```ts
+import { StatelessQuestion } from "@grammyjs/stateless-question";
 
-const adapter = new MemoryStorageAdapter();
-bot.use(chatMembers(adapter));
+const unicornQuestion = new StatelessQuestion("unicorns", async (ctx) => {
+  console.log("User answered:", ctx.message.text);
+});
 
-bot.command("check_admin", async (ctx) => {
-  const status = await ctx.chatMembers.getChatMember();
-  await ctx.reply(`Your status is: ${status.status}`);
+bot.use(unicornQuestion.middleware());
+
+bot.command("ask", async (ctx) => {
+  await unicornQuestion.replyWithMarkdown(ctx, "What are unicorns doing?");
 });
 ```
 
 ---
 
-### 4.11 Commands (`@grammyjs/commands`)
-Allows defining bot commands centrally and syncing them automatically with Telegram's command menu via `setMyCommands`.
+# Part III: Third-Party Plugins & Plugin Authoring
 
-```bash
-bun add @grammyjs/commands
-```
+## 21. Console Time (`telegraf-middleware-console-time`)
 
-```typescript
-import { commands, type CommandsFlavor } from "@grammyjs/commands";
+Logs update timing and profiles slow middleware during development (`npm install telegraf-middleware-console-time`):
 
-type MyContext = CommandsFlavor<Context>;
-const bot = new Bot<MyContext>(process.env.BOT_TOKEN!);
+```ts
+import {
+  generateAfterMiddleware,
+  generateBeforeMiddleware,
+  generateUpdateMiddleware,
+} from "telegraf-middleware-console-time";
 
-const myCommands = commands();
-myCommands.set({
-  command: "start",
-  description: "Start the bot",
-});
-myCommands.set({
-  command: "help",
-  description: "Show help information",
-});
-
-bot.use(myCommands);
-// Automatically registers command list with BotFather
-await bot.api.setMyCommands(myCommands.toObject());
-```
-
----
-
-### 4.12 Entity Parser (`@grammyjs/entity-parser`)
-Provides utilities to inspect, extract, and manipulate message entities (bold, code, links, mentions) without manual byte offset calculations.
-
-```bash
-bun add @grammyjs/entity-parser
-```
-
-```typescript
-import { parseEntities } from "@grammyjs/entity-parser";
-
-bot.on("message:text", (ctx) => {
-  const parsed = parseEntities(ctx.msg);
-  for (const part of parsed) {
-    if (part.type === "url") {
-      console.log("Found URL:", part.text);
-    }
-  }
-});
-```
-
----
-
-### 4.13 Useful Middlewares (`@grammyjs/middlewares`)
-Collection of utility middlewares: `ignoreOld` (drops updates received while bot was offline), `ipFilter` (restricts webhooks), etc.
-
-```bash
-bun add @grammyjs/middlewares
-```
-
-```typescript
-import { ignoreOld } from "@grammyjs/middlewares";
-
-// Drop updates older than 5 minutes
-bot.use(ignoreOld(300));
-```
-
----
-
-## 5. How to Create Your Own Plugins
-
-grammY plugins come in two varieties:
-
-### 5.1 Middleware Plugins (Input Interception)
-A middleware plugin extends `ctx` or intercepts the update flow.
-
-```typescript
-import { type Middleware, type Context } from "grammy";
-
-export interface MyPluginOptions {
-  greeting?: string;
+if (process.env.NODE_ENV !== "production") {
+  bot.use(generateUpdateMiddleware());
 }
 
-export function myPlugin<C extends Context>(options: MyPluginOptions = {}): Middleware<C> {
-  const greeting = options.greeting || "Hello!";
-  
-  return async (ctx, next) => {
-    // Modify ctx or perform pre-processing
-    console.log(`[MyPlugin] Processing update for user ${ctx.from?.id}`);
-    
-    // Call next middleware
-    await next();
-    
-    // Post-processing
-  };
-}
-
-// Usage:
-// bot.use(myPlugin({ greeting: "Welcome!" }));
-```
-
-### 5.2 Transformer Plugins (Output Interception)
-A transformer plugin modifies or intercepts outgoing Bot API requests (like `@grammyjs/auto-retry` or `@grammyjs/parse-mode`).
-
-```typescript
-import { type Transformer } from "grammy";
-
-export function autoCapitalize(): Transformer {
-  return async (prev, method, payload, signal) => {
-    if (method === "sendMessage" && typeof payload.text === "string") {
-      payload.text = payload.text.toUpperCase();
-    }
-    return await prev(method, payload, signal);
-  };
-}
-
-// Usage:
-// bot.api.config.use(autoCapitalize());
+// Profile a specific middleware "db-load":
+bot.use(generateBeforeMiddleware("db-load"));
+bot.use(myMiddleware);
+bot.use(generateAfterMiddleware("db-load"));
 ```
 
 ---
 
-## 6. Plugin Summary Matrix
+## 22. Useful Middlewares (`grammy-middlewares`)
 
-| Plugin | Type | Primary Purpose | Best Used When |
-| :--- | :--- | :--- | :--- |
-| `session` | Middleware | State storage per chat/user | User preferences, shopping carts, step tracking |
-| `@grammyjs/conversations` | Middleware | Multi-step linear branching dialogs | Forms, onboarding wizards, questionnaires |
-| `@grammyjs/menu` | Middleware | Interactive inline keyboards | Settings, navigations, pagination, toggles |
-| `@grammyjs/runner` | Orchestrator | High-throughput concurrent polling | 100+ updates/minute in polling mode |
-| `@grammyjs/auto-retry` | Transformer | Automatic 429 backoff handling | Every production bot making API calls |
-| `@grammyjs/transformer-throttler` | Transformer | Outbound traffic smoothing | Broadcasts, heavy group bot operations |
-| `@grammyjs/ratelimiter` | Middleware | Inbound spam control | Public groups and high-traffic bots |
-| `@grammyjs/hydrate` | Synergistic | Chaining methods on messages | Interactive and mutating messages |
-| `@grammyjs/parse-mode` | Transformer | Default HTML/Markdown formatting | Consistent formatting across all messages |
-| `@grammyjs/stream` | Synergistic | Streaming text drafts incrementally | LLM tokens, AI text completions |
-| `@grammyjs/stateless-question`| Middleware | Asking questions without DB storage | Single-question prompt replies without sessions |
-| `@grammyjs/media-group` | Middleware | Aggregating album uploads into one | Photo/video batch upload handlers |
-| `@grammyjs/router` | Middleware | Deterministic finite state routing | Complex wizard state machine branches |
-| `@grammyjs/chat-members` | Middleware | Caching member status & permissions | Group administration bots |
-| `@grammyjs/commands` | Middleware | Dynamic command menu registration | Syncing commands with BotFather menu |
-| `@grammyjs/entity-parser` | Utility | Inspecting and slicing entities | Custom message formatters & link extractors |
-| `@grammyjs/middlewares` | Utility | ignoreOld, IP filters | Dropping stale updates after downtime |
+Collection of common guard middlewares (`npm install grammy-middlewares`):
 
+```ts
+import {
+  ignoreOld,
+  onlyAdmin,
+  onlyPublic,
+  onlySuperAdmin,
+  sequentialize,
+} from "grammy-middlewares";
+
+bot.use(
+  ignoreOld(5 * 60), // Ignore updates older than 5 minutes
+  onlyPublic((ctx) => ctx.reply("Group/channel only!")),
+  onlyAdmin((ctx) => ctx.reply("Admins only!")),
+  onlySuperAdmin(Number(process.env.SUPER_ADMIN_ID)),
+  sequentialize(),
+);
+```
+
+---
+
+## 23. Autoquote (`@roziscoding/grammy-autoquote`)
+
+Automatically injects `reply_parameters` into outgoing `reply*` / `send*` calls so the bot always quotes the triggering message (`npm install @roziscoding/grammy-autoquote`):
+
+```ts
+import { addReplyParam, autoQuote } from "@roziscoding/grammy-autoquote";
+
+// Apply globally to every handler:
+bot.use(autoQuote({ allowSendingWithoutReply: true }));
+
+// Or apply only inside a specific handler:
+bot.command("quote", async (ctx) => {
+  ctx.api.config.use(addReplyParam(ctx));
+  await ctx.reply("This automatically quotes your command!");
+});
+```
+
+---
+
+## 24. Entity Parser (`@qz/telegram-entities-parser`)
+
+Converts Telegram message `entities` into sanitized, semantic HTML (`npx jsr add @qz/telegram-entities-parser`).
+> **When to use**: ONLY when rendering Telegram messages **outside Telegram** (e.g., on a web dashboard). Inside Telegram, use `ctx.copyMessage(chatId)`, `ctx.forwardMessage(chatId)`, or `@grammyjs/parse-mode` instead!
+
+```ts
+import { EntitiesParser, RendererHtml } from "@qz/telegram-entities-parser";
+
+const entitiesParser = new EntitiesParser();
+
+bot.on([":text", ":photo"], (ctx) => {
+  const html = entitiesParser.parse({ message: ctx.msg });
+  console.log("Sanitized HTML for web display:", html);
+});
+```
+
+---
+
+## 25. Developing Custom Plugins (`plugins/guide.md`)
+
+grammY plugins fall into two categories (or combine both):
+
+1. **Middleware Plugin** (intercepts incoming updates; installed via `bot.use()`):
+   ```ts
+   import type { Context, Middleware } from "grammy";
+
+   export function onlyUsersNamed<C extends Context>(substr: string): Middleware<C> {
+     return async (ctx, next) => {
+       if (ctx.from?.first_name.includes(substr)) {
+         await next();
+       }
+     };
+   }
+   ```
+2. **Transformer Plugin** (intercepts outgoing API calls; installed via `bot.api.config.use()`):
+   ```ts
+   import type { Transformer } from "grammy";
+
+   export function autoChatAction(): Transformer {
+     return async (prev, method, payload, signal) => {
+       let handle: ReturnType<typeof setInterval> | undefined;
+       if (method === "sendDocument" && "chat_id" in payload) {
+         handle = setInterval(() => {
+           prev("sendChatAction", { chat_id: payload.chat_id, action: "upload_document" }).catch(console.error);
+         }, 5000);
+       }
+       try {
+         return await prev(method, payload, signal);
+       } finally {
+         clearInterval(handle);
+       }
+     };
+   }
+   ```
+3. **Packaging for Deno & Node.js**: Official grammY plugins use the [`grammyjs/plugin-template`](https://github.com/grammyjs/plugin-template) structure (`src/deps.deno.ts`, `src/deps.node.ts`, `src/index.ts`) and transpile Deno TypeScript to Node.js packages using `deno2node`.

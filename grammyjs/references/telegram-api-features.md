@@ -1,106 +1,142 @@
-# Telegram Bot API 7.x & 8.x Modern Features
+# Modern Telegram Bot API Features in grammY (Bot API 7.x – 10.x)
 
-This reference covers modern Telegram Bot API capabilities in grammY: Telegram Stars (digital goods & paid media), Telegram Business connections, message reactions, Mini Apps (Web Apps), message effects, and forum topics.
+## Table of Contents
+
+1. [Telegram Stars (`XTR`: Digital Goods, Subscriptions & Refunds)](#1-telegram-stars-xtr-digital-goods-subscriptions--refunds)
+2. [Paid Media & Paid Broadcasts](#2-paid-media--paid-broadcasts)
+3. [Telegram Business Integration](#3-telegram-business-integration)
+4. [Message Reactions (Emoji, Custom Emoji & Paid Star Reactions)](#4-message-reactions-emoji-custom-emoji--paid-star-reactions)
+5. [Message Effects, Quotes, Link Previews & Spoilers](#5-message-effects-quotes-link-previews--spoilers)
+6. [Telegram Mini Apps (Web Apps) & `initData` Verification](#6-telegram-mini-apps-web-apps--initdata-verification)
+7. [Forum Topics & Supergroup Threads](#7-forum-topics--supergroup-threads)
 
 ---
 
-## 1. Telegram Stars (Digital Goods & Payments)
+## 1. Telegram Stars (`XTR`: Digital Goods, Subscriptions & Refunds)
 
-Telegram Stars (`XTR`) allow bots to sell digital goods and services inside Telegram without third-party payment gateways.
+Telegram Stars (`currency: "XTR"`, `provider_token: ""`) allow bots to sell digital goods, services, and recurring subscriptions natively inside Telegram.
 
-### 1.1 Creating an Invoice Link
-```typescript
-bot.command("buy_item", async (ctx) => {
-  const invoiceLink = await ctx.api.createInvoiceLink({
-    title: "Premium VIP Subscription",
-    description: "Unlock 30 days of VIP analytical access",
-    payload: `sub_vip_${ctx.from?.id}_${Date.now()}`,
-    currency: "XTR", // Telegram Stars currency code
-    prices: [{ label: "VIP Pass", amount: 150 }], // 150 Stars
-  });
+### 1.1 Creating an Invoice Link (`createInvoiceLink`)
+`ctx.api.createInvoiceLink` takes `(title, description, payload, provider_token, currency, prices, other?)`:
 
-  const keyboard = new InlineKeyboard().url("⭐️ Pay 150 Stars", invoiceLink);
-  await ctx.reply("Click below to complete payment with Stars:", {
+```ts
+import { InlineKeyboard } from "grammy";
+
+bot.command("buy_vip", async (ctx) => {
+  const invoiceLink = await ctx.api.createInvoiceLink(
+    "Premium VIP Pass",
+    "Unlock 30 days of VIP access",
+    `sub_vip_${ctx.from?.id}_${Date.now()}`,
+    "",    // provider_token must be "" for Telegram Stars (XTR)
+    "XTR", // Telegram Stars currency code
+    [{ label: "VIP Pass", amount: 150 }], // 150 Stars
+  );
+
+  const keyboard = new InlineKeyboard().url("⭐ Pay 150 Stars", invoiceLink);
+  await ctx.reply("Click below to complete payment with Telegram Stars:", {
     reply_markup: keyboard,
   });
 });
 ```
 
-### 1.2 Direct Invoice Message
-```typescript
-await ctx.replyWithInvoice({
-  title: "Special Sticker Pack",
-  description: "Exclusive pack crafted for our community",
-  payload: "pack_stars_01",
-  currency: "XTR",
-  prices: [{ label: "Sticker Pack", amount: 50 }],
+### 1.2 Sending an Invoice Message Directly (`replyWithInvoice`)
+`ctx.replyWithInvoice` takes `(title, description, payload, currency, prices, other?)` (in recent grammY versions `provider_token` is optional in `other` and defaults to `""` for Stars):
+
+```ts
+bot.command("invoice", async (ctx) => {
+  await ctx.replyWithInvoice(
+    "Exclusive Sticker Pack",
+    "Unlock our community sticker collection",
+    "pack_stars_01",
+    "XTR",
+    [{ label: "Sticker Pack", amount: 50 }],
+  );
 });
 ```
 
-### 1.3 Pre-Checkout & Payment Confirmation
-Telegram requires bots to validate pre-checkout queries within 10 seconds.
+### 1.3 Handling `pre_checkout_query` & `:successful_payment`
+Telegram requires your bot to answer `pre_checkout_query` within **10 seconds**:
 
-```typescript
-// 1. Approve pre-checkout query
+```ts
+// 1. Validate and approve pre-checkout query within 10s
 bot.on("pre_checkout_query", async (ctx) => {
-  const query = ctx.preCheckoutQuery;
-  console.log(`Pre-checkout from ${ctx.from.id}, payload: ${query.invoice_payload}`);
+  const payload = ctx.preCheckoutQuery.invoice_payload;
+  const inStock = true; // Verify inventory / user eligibility
 
-  // Validate inventory or database status
-  const itemInStock = true;
-
-  if (itemInStock) {
+  if (inStock) {
     await ctx.answerPreCheckoutQuery(true);
   } else {
     await ctx.answerPreCheckoutQuery(false, {
-      error_message: "Sorry, this item is temporarily out of stock.",
+      error_message: "Sorry, this item is currently unavailable.",
     });
   }
 });
 
-// 2. Handle successful payment
+// 2. Provision digital goods on successful payment
 bot.on("message:successful_payment", async (ctx) => {
-  const payment = ctx.msg.successful_payment;
-  console.log(`Payment successful! Charge ID: ${payment.telegram_payment_charge_id}`);
-  console.log(`Amount: ${payment.total_amount} ${payment.currency}`);
-
-  // Provision user permissions in database
-  await ctx.reply("🎉 Payment received! Your VIP features are now activated.");
+  const payment = ctx.message.successful_payment;
+  console.log(
+    `Paid ${payment.total_amount} ${payment.currency}, charge_id: ${payment.telegram_payment_charge_id}`,
+  );
+  // Save payment.telegram_payment_charge_id in DB (needed for refunds!)
+  await ctx.reply("🎉 Payment received! Your VIP access is now active.");
 });
 ```
 
-### 1.4 Refunding Stars
-```typescript
+### 1.4 Refunding Star Payments & Star Subscriptions
+```ts
+// Refund a Telegram Stars payment using the stored telegram_payment_charge_id:
 await ctx.api.refundStarPayment(userId, telegramPaymentChargeId);
+
+// Query the bot's Star transactions:
+const transactions = await bot.api.getStarTransactions({ limit: 50 });
+
+// Create a paid Star subscription invite link for a channel (monthly = 2592000s):
+const subLink = await ctx.api.createChatInviteLink(channelId, {
+  name: "Monthly VIP Channel",
+  subscription_period: 2592000,
+  subscription_price: 200, // 200 Stars/month
+});
 ```
 
 ---
 
 ## 2. Paid Media & Paid Broadcasts
 
-### 2.1 Sending Paid Media (Locked behind Stars)
-Allows sending photos and videos that users can preview in blurred form and unlock with Stars.
+### 2.1 Sending Paid Media (`sendPaidMedia`)
+Send blurred photos/videos that users can unlock with Telegram Stars:
 
-```typescript
+```ts
 import { InputFile } from "grammy";
 
 bot.command("exclusive", async (ctx) => {
-  await ctx.api.sendPaidMedia(ctx.chat.id, 25, [ // 25 Stars required
+  await ctx.api.sendPaidMedia(
+    ctx.chat.id,
+    25, // 25 Stars to unlock
+    [
+      {
+        type: "photo",
+        media: new InputFile("./assets/exclusive_art.png"),
+      },
+    ],
     {
-      type: "photo",
-      media: new InputFile("./assets/exclusive_art.png"),
+      caption: "Unlock this artwork for 25 Stars!",
+      payload: "art_01",
     },
-  ], {
-    caption: "Unlock exclusive digital artwork for 25 Stars!",
-  });
+  );
+});
+
+// Listen for purchased paid media updates (enable "purchased_paid_media" in allowed_updates):
+bot.on("purchased_paid_media", async (ctx) => {
+  console.log(`User ${ctx.from.id} unlocked paid media: ${ctx.purchasedPaidMedia.paid_media_payload}`);
 });
 ```
 
-### 2.2 Paid Broadcasts
-If your bot holds a balance of at least 10,000 Telegram Stars, you can send up to 1,000 messages/sec by passing `allow_paid_broadcast`:
+### 2.2 Paid Broadcasts (`allow_paid_broadcast`)
+Raise your bot's broadcast limit up to **1,000 messages/second** (costs 0.1 Stars per message over 30 msg/s):
 
-```typescript
-await ctx.api.sendMessage(chatId, "Important announcement!", {
+```ts
+await bot.api.sendMessage(chatId, "Flash announcement!", {
   allow_paid_broadcast: true,
 });
 ```
@@ -109,74 +145,53 @@ await ctx.api.sendMessage(chatId, "Important announcement!", {
 
 ## 3. Telegram Business Integration
 
-Telegram Business allows regular Telegram user accounts to connect a bot to manage, reply, and automate their private chats.
+See [Advanced Patterns: Telegram Business Bots](./advanced-patterns.md#3-telegram-business-bots-advancedbusinessmd) for complete details.
 
-### 3.1 Business Connection Updates
-```typescript
+```ts
+// Connection lifecycle
 bot.on("business_connection", async (ctx) => {
   const conn = ctx.businessConnection;
-  console.log(`Business connection update:`);
-  console.log(`ID: ${conn.id}, User: ${conn.user.first_name} (${conn.user.id})`);
-  console.log(`Is Enabled: ${conn.is_enabled}, Can Reply: ${conn.can_reply}`);
-});
-```
-
-### 3.2 Handling Business Messages
-When a user sends a message to a business account connected to your bot:
-
-```typescript
-bot.on("business_message", async (ctx) => {
-  const msg = ctx.businessMessage;
-  console.log(`Received business message from customer in chat ${msg.chat.id}`);
-
-  // Automatic replies will include business_connection_id automatically
-  await ctx.reply("👋 Hello! Thanks for reaching out. We will get back to you shortly.");
+  if (conn.is_enabled && conn.rights?.can_reply) {
+    await bot.api.sendMessage(conn.user_chat_id, "Business bot connected!");
+  }
 });
 
-bot.on("edited_business_message", async (ctx) => {
-  console.log("Business message was edited");
+// Customer vs. Business Owner messages
+bot.on("business_message:text", async (ctx) => {
+  const conn = await ctx.getBusinessConnection();
+  if (ctx.from.id === conn.user.id) return; // Ignore messages sent by the business owner
+
+  // ctx.reply automatically attaches ctx.businessConnectionId!
+  await ctx.reply("Thanks for reaching out! We will reply shortly.");
 });
 ```
 
 ---
 
-## 4. Message Reactions (Bot API 7.0+)
+## 4. Message Reactions (Emoji, Custom Emoji & Paid Star Reactions)
 
-### 4.1 Listening to Reactions
-```typescript
-// Specific reaction emoji
-bot.reaction("🔥", async (ctx) => {
-  await ctx.reply("Hot!");
-});
+See [Core & Context: Reactions](./core-and-context.md#8-reactions-ctxreact-botreaction-ctxreactions) for full details.
 
-// Reacting to any reaction update
+```ts
+// React to the current message
+bot.command("like", (ctx) => ctx.react("👍"));
+
+// Listen for newly added emoji, custom_emoji, or paid Star reactions
+bot.reaction(["🔥", "🎉"], (ctx) => ctx.reply("Thanks for the reaction!"));
+bot.reaction({ type: "paid" }, (ctx) => ctx.reply("Thanks for the Star reaction! ⭐"));
+
+// Inspect added/removed reactions via ctx.reactions()
 bot.on("message_reaction", async (ctx) => {
-  const { old_reaction, new_reaction } = ctx.messageReaction;
-  console.log("Reactions changed from:", old_reaction, "to:", new_reaction);
-});
-```
-
-### 4.2 Bot Setting Reactions on Messages
-```typescript
-bot.on("message:text", async (ctx) => {
-  // Shortcut method:
-  await ctx.react("👍");
-
-  // Or set custom emoji reactions:
-  await ctx.api.setMessageReaction(ctx.chat.id, ctx.msg.message_id, [
-    { type: "emoji", emoji: "🎉" },
-  ]);
+  const { emojiAdded, emojiRemoved, paidAdded } = ctx.reactions();
+  if (paidAdded) await ctx.reply("Star reaction added!");
 });
 ```
 
 ---
 
-## 5. Message Effects
+## 5. Message Effects, Quotes, Link Previews & Spoilers
 
-Telegram allows bots to send messages with animated full-screen effects (e.g., flames, fireworks, confetti).
-
-```typescript
-// Known Telegram effect IDs:
+```ts
 const EFFECTS = {
   FIRE: "5104841245755180586",
   THUMBS_UP: "5107584321108051014",
@@ -184,34 +199,62 @@ const EFFECTS = {
   CONFETTI: "5046509860389126442",
 };
 
-bot.command("congrats", async (ctx) => {
-  await ctx.reply("🎉 Congratulations on leveling up!", {
+bot.on("message:text", async (ctx) => {
+  await ctx.reply("🎉 Level up!", {
+    // Animated message effect:
     message_effect_id: EFFECTS.CONFETTI,
+    // Quote a specific substring of the user's message:
+    reply_parameters: {
+      message_id: ctx.msg.message_id,
+      quote: ctx.msg.text.slice(0, 30),
+      allow_sending_without_reply: true,
+    },
+    // Customize link preview appearance:
+    link_preview_options: {
+      url: "https://grammy.dev",
+      prefer_large_media: true,
+      show_above_text: true,
+    },
   });
+});
+
+// Send media with a blur spoiler overlay:
+await ctx.replyWithPhoto("https://grammy.dev/images/Y.png", {
+  has_spoiler: true,
 });
 ```
 
 ---
 
-## 6. Telegram Mini Apps (Web Apps)
+## 6. Telegram Mini Apps (Web Apps) & `initData` Verification
 
-### 6.1 Creating Web App Buttons
-```typescript
-import { InlineKeyboard } from "grammy";
+### 6.1 Launching Mini Apps (`InlineKeyboard.webApp` vs `Keyboard.webApp`)
+- **`InlineKeyboard().webApp(text, url)`**: Opens the Mini App with full context; can call `answerWebAppQuery` from your backend.
+- **`Keyboard().webApp(text, url)`**: Opens the Mini App from a custom reply keyboard; when the Mini App calls `Telegram.WebApp.sendData(str)`, your bot receives a `message:web_app_data` update:
 
-const kb = new InlineKeyboard().webApp(
-  "🚀 Launch Mini App",
-  "https://my-telegram-mini-app.pages.dev"
-);
+```ts
+import { InlineKeyboard, Keyboard } from "grammy";
 
-await ctx.reply("Open our interactive mini app:", { reply_markup: kb });
+bot.command("webapp", async (ctx) => {
+  const inlineKb = new InlineKeyboard().webApp(
+    "🚀 Open Mini App",
+    "https://my-mini-app.example.com",
+  );
+  await ctx.reply("Launch our Mini App:", { reply_markup: inlineKb });
+});
+
+// Handle data sent back from Keyboard().webApp via Telegram.WebApp.sendData():
+bot.on("message:web_app_data", async (ctx) => {
+  const { button_text, data } = ctx.message.web_app_data;
+  await ctx.reply(`Received data from "${button_text}": ${data}`);
+});
 ```
 
-### 6.2 Validating Mini App `initData` (Crypto Verification)
-Telegram Mini Apps pass signed `initData` via `window.Telegram.WebApp.initData`. Always verify this cryptographically before trusting user state!
+### 6.2 Cryptographic Verification of `window.Telegram.WebApp.initData`
+Always validate `initData` on your backend before trusting the user identity in a Mini App:
 
-```typescript
-import { createHmac } from "node:crypto";
+```ts
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 export function verifyTelegramWebAppData(initData: string, botToken: string): boolean {
   const urlParams = new URLSearchParams(initData);
@@ -220,40 +263,39 @@ export function verifyTelegramWebAppData(initData: string, botToken: string): bo
 
   urlParams.delete("hash");
 
-  // Sort keys alphabetically
   const dataCheckString = Array.from(urlParams.entries())
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, val]) => `${key}=${val}`)
     .join("\n");
 
-  // Generate secret key: HMAC-SHA256 of botToken with key "WebAppData"
   const secretKey = createHmac("sha256", "WebAppData").update(botToken).digest();
-
-  // Calculate signature of dataCheckString
   const calculatedHash = createHmac("sha256", secretKey).update(dataCheckString).digest("hex");
 
-  return calculatedHash === hash;
+  const a = Buffer.from(calculatedHash, "hex");
+  const b = Buffer.from(hash, "hex");
+  return a.length === b.length && timingSafeEqual(a, b);
 }
 ```
 
 ---
 
-## 7. Forum Topics & Threads
+## 7. Forum Topics & Supergroup Threads
 
-For supergroups with forum topics enabled:
+In supergroups with Forum Topics enabled (`ctx.chat.is_forum === true`):
 
-```typescript
-bot.on("message", async (ctx) => {
-  const threadId = ctx.msg.message_thread_id;
-  if (threadId) {
-    console.log(`Message received inside Forum Topic #${threadId}`);
-    // Replies automatically stay within the same topic:
-    await ctx.reply("Replied inside this topic thread!");
-  }
+```ts
+// Create a new Forum Topic:
+bot.command("newtopic", async (ctx) => {
+  const topic = await ctx.createForumTopic("Support Thread 🛠");
+  await ctx.api.sendMessage(ctx.chat.id, "Thread initialized!", {
+    message_thread_id: topic.message_thread_id,
+  });
 });
 
-// Explicitly send message to a topic:
-await ctx.api.sendMessage(supergroupId, "Topic announcement", {
-  message_thread_id: 12345,
+// Reply inside the same Forum Topic thread:
+bot.on("message:is_topic_message", async (ctx) => {
+  const threadId = ctx.msg.message_thread_id;
+  // Note: ctx.reply() automatically targets ctx.msg.message_thread_id in grammY!
+  await ctx.reply(`Replying inside topic #${threadId}`);
 });
 ```

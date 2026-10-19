@@ -10,11 +10,11 @@ if (!webhookSecret) throw new Error("WEBHOOK_SECRET is required!");
 export const bot = new Bot(token);
 
 bot.command("start", (ctx) => {
-  ctx.reply("👋 Hello from Node.js Express Webhook server!");
+  return ctx.reply("👋 Hello from Node.js Express Webhook server!");
 });
 
 bot.on("message:text", (ctx) => {
-  ctx.reply(`Echo: ${ctx.msg.text}`);
+  return ctx.reply(`Echo: ${ctx.msg.text}`);
 });
 
 const app = express();
@@ -24,16 +24,20 @@ app.get("/healthz", (_req, res) => {
   res.status(200).send("OK");
 });
 
-// CRITICAL: Do NOT use express.json() for this route;
-// grammY's express adapter consumes the raw incoming stream.
+// Parse incoming JSON bodies (required by grammY's "express" webhookCallback adapter)
+app.use(express.json());
+
+// Mount webhook handler on a secret path with secretToken verification
 app.use(
   "/webhook",
   webhookCallback(bot, "express", {
     secretToken: webhookSecret,
-  })
+    timeoutMilliseconds: 10_000,
+    onTimeout: "return",
+  }),
 );
 
-const PORT = process.env.PORT || 3000;
+const PORT = Number(process.env.PORT) || 3000;
 const server = app.listen(PORT, () => {
   console.log(`🚀 Node.js webhook server running on port ${PORT}`);
 });
@@ -47,5 +51,5 @@ const shutdown = () => {
   });
 };
 
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
+process.once("SIGINT", shutdown);
+process.once("SIGTERM", shutdown);

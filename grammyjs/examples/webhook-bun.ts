@@ -8,21 +8,22 @@ if (!webhookSecret) throw new Error("WEBHOOK_SECRET is required!");
 
 export const bot = new Bot(token);
 
-bot.command("start", (ctx) => {
-  ctx.reply("⚡ Fast and lightweight Telegram bot powered by Bun & grammY!");
+bot.command("start", async (ctx) => {
+  await ctx.reply("⚡ Fast and lightweight Telegram bot powered by Bun & grammY!");
 });
 
-bot.command("info", (ctx) => {
-  ctx.reply(`Runtime: Bun ${Bun.version}\nPlatform: ${process.platform}`);
+bot.command("info", async (ctx) => {
+  await ctx.reply(`Runtime: Bun ${Bun.version}\nPlatform: ${process.platform}`);
 });
 
-bot.on("message:text", (ctx) => {
-  ctx.reply(`Received: ${ctx.msg.text}`);
+bot.on("message:text", async (ctx) => {
+  await ctx.reply(`Received: ${ctx.msg.text}`);
 });
 
 // Configure webhook handler with secret token authentication
 const handleWebhook = webhookCallback(bot, "bun", {
   secretToken: webhookSecret,
+  timeoutMilliseconds: 10_000,
   onTimeout: () => {
     console.warn("⚠️ Webhook processing timed out (>10s)");
   },

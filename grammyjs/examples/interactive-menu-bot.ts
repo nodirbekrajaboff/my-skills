@@ -18,50 +18,59 @@ bot.use(
       sound: true,
       language: "en",
     }),
-  })
+  }),
 );
 
-// 1. Language Submenu
+const LANGUAGES = [
+  { code: "en", label: "🇬🇧 English" },
+  { code: "es", label: "🇪🇸 Español" },
+  { code: "de", label: "🇩🇪 Deutsch" },
+];
+
+// 1. Language Submenu using .dynamic() and button payloads
 const languageMenu = new Menu<MyContext>("language-menu")
-  .text(
-    (ctx) => (ctx.session.language === "en" ? "🇬🇧 English ✅" : "🇬🇧 English"),
-    (ctx) => {
-      ctx.session.language = "en";
-      ctx.menu.update();
+  .dynamic((ctx, range) => {
+    for (const lang of LANGUAGES) {
+      const isSelected = ctx.session.language === lang.code;
+      range.text(
+        {
+          text: isSelected ? `${lang.label} ✅` : lang.label,
+          payload: lang.code,
+        },
+        (ctx) => {
+          ctx.session.language = ctx.match;
+          ctx.menu.update();
+        },
+      );
     }
-  )
-  .text(
-    (ctx) => (ctx.session.language === "es" ? "🇪🇸 Español ✅" : "🇪🇸 Español"),
-    (ctx) => {
-      ctx.session.language = "es";
-      ctx.menu.update();
-    }
-  )
+  })
   .row()
   .back("⬅️ Back to Settings");
 
 // 2. Settings Root Menu
-const settingsMenu = new Menu<MyContext>("settings-menu")
+const settingsMenu = new Menu<MyContext>("settings-menu", {
+  onMenuOutdated: "⚙️ Menu was updated, refreshing...",
+})
   .text(
     (ctx) => (ctx.session.notifications ? "🔔 Notifications: ON" : "🔕 Notifications: OFF"),
     (ctx) => {
       ctx.session.notifications = !ctx.session.notifications;
       ctx.menu.update();
-    }
+    },
   )
   .text(
     (ctx) => (ctx.session.sound ? "🔊 Sound: ON" : "🔇 Sound: OFF"),
     (ctx) => {
       ctx.session.sound = !ctx.session.sound;
       ctx.menu.update();
-    }
+    },
   )
   .row()
   .submenu("🌐 Select Language", "language-menu")
   .row()
-  .text("❌ Close Menu", (ctx) => ctx.deleteMessage());
+  .text("❌ Close Menu", (ctx) => ctx.menu.close());
 
-// 3. Register menu hierarchy and mount onto bot
+// 3. Register submenu hierarchy and mount root menu BEFORE command handlers
 settingsMenu.register(languageMenu);
 bot.use(settingsMenu);
 
