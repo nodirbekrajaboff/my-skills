@@ -1,0 +1,29 @@
+{
+  "repository": "nodirbekrajaboff/my-skills",
+  "skills": {
+    "bunjs": {
+      "version": "0.1.0",
+      "updated": "2026-10-15",
+      "contentHash": "b5d466ba3ab2d358",
+      "fullHash": "ba1dec161a941d25"
+    },
+    "cicd": {
+      "version": "1.0.0",
+      "updated": "2026-10-15",
+      "contentHash": "ee2b9ce0fc6d2028",
+      "fullHash": "95ad55adcee5eaa4"
+    },
+    "grammyjs": {
+      "version": "1.1.0",
+      "updated": "2026-10-19",
+      "contentHash": "f947e73d5d6518eb",
+      "fullHash": "297137213733a17e"
+    },
+    "telegram-mini-apps": {
+      "version": "1.0.0",
+      "updated": "2026-10-21",
+      "contentHash": "e0fb880a7210280b",
+      "fullHash": "b3e3e3ad5d8c5d26"
+    }
+  }
+}

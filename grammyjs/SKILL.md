@@ -1,6 +1,11 @@
 ---
 name: grammyjs
 description: Comprehensive guide and reference for building, structuring, scaling, and deploying Telegram Bots using the grammY framework (`grammy` and `@grammyjs/*` plugins) in TypeScript and JavaScript across Node.js, Deno, Bun, and Serverless/Edge platforms. Trigger this skill whenever the user creates, modifies, debugs, or asks about a Telegram bot using grammY, `@grammyjs/conversations` (v2), `@grammyjs/menu`, `@grammyjs/runner`, `@grammyjs/commands`, `@grammyjs/parse-mode` (`fmt` / `FormattedString`), `@grammyjs/i18n`, `@grammyjs/hydrate`, `@grammyjs/stream`, `@grammyjs/chat-members`, `@grammyjs/files`, `@grammyjs/auto-retry`, Telegram Stars (`XTR`), Business Bots, Mini Apps (`WebApp`), Inline Queries, Filter Queries, Sessions, or Webhooks.
+version: 1.1.0
+metadata:
+  version: "1.1.0"
+  author: nodirbekrajaboff
+  updated: "2026-10-19"
 ---
 
 # grammY — The Telegram Bot Framework Skill

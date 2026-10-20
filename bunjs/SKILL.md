@@ -1,6 +1,11 @@
 ---
 name: bunjs
 description: A brief description of what this skill does
+version: 0.1.0
+metadata:
+  version: "0.1.0"
+  author: nodirbekrajaboff
+  updated: "2026-10-15"
 ---
 
 # bunjs

@@ -1,0 +1,5 @@
+#!/usr/bin/env sh
+# Automatically bump SKILL.md version & versions.json for any modified skill before commit
+
+node scripts/bump-skill.mjs sync patch
+git add versions.json */SKILL.md 2>/dev/null || true

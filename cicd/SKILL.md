@@ -1,6 +1,11 @@
 ---
 name: cicd
 description: Design, write, debug, and optimize CI/CD pipelines for GitHub Actions, Dokploy, Coolify, Portainer, CapRover, and direct VPS servers. Use this skill whenever the user asks about GitHub Actions workflows, automated testing, quality gates, Docker build and push, monorepo change detection, deploying to Dokploy via webhooks or REST API, zero-downtime database migrations, rollbacks, or deploying to other server controllers and VPS instances.
+version: 1.0.0
+metadata:
+  version: "1.0.0"
+  author: nodirbekrajaboff
+  updated: "2026-10-15"
 ---
 
 # Universal CI/CD Architecture & Server Controllers Guide

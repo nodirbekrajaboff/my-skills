@@ -1,0 +1,12 @@
+{
+  "name": "my-skills",
+  "private": true,
+  "type": "module",
+  "description": "Custom AI Agent Skills repository with automatic SKILL.md semantic versioning",
+  "scripts": {
+    "version:list": "node scripts/bump-skill.mjs list",
+    "version:sync": "node scripts/bump-skill.mjs sync",
+    "version:bump": "node scripts/bump-skill.mjs bump",
+    "hooks:install": "git config core.hooksPath scripts && chmod +x scripts/pre-commit scripts/bump-skill.mjs"
+  }
+}
